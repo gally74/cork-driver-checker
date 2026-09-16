@@ -126,11 +126,13 @@ PAGE_RE = re.compile(r"(?m)^-\s*(\d{1,3})\s*-")
 
 PLACE_ALIASES = (
     ("portarlington", ("portarlington", "ptarlington")),
+    ("portlaoise", ("portlaoise", "ptlaoise", "ploise")),
     ("limerick jctn", ("limerick jct", "limerick junction", " l.j", " lj ", "ljct")),
     ("killarney", ("killarney",)),
     ("thurles", ("thurles",)),
     ("tralee", ("tralee",)),
     ("mallow", ("mallow", " mw ", "mw–", "mw -", "mw-")),
+    ("charleville", ("charleville",)),
     ("waterford", ("waterford",)),
     ("limerick", ("limerick",)),
     ("conduct", ("conduct", "conducting")),
@@ -515,6 +517,33 @@ def distinctive_needles(item: CorkDriverItem) -> List[str]:
     return unique(needles)
 
 
+def digits_only(text: str) -> str:
+    return re.sub(r"\D+", "", text)
+
+
+def times_present_in(text: str, times: Sequence[str]) -> List[str]:
+    """Match 1047, 10.47 or 10:47 on the daily sheet."""
+    compact = digits_only(text)
+    dotted = normalize_sheet(text)
+    found = []
+    for hhmm in times:
+        hour, minute = hhmm[:2], hhmm[2:]
+        hour_n = str(int(hour))
+        if hhmm in compact:
+            found.append(hhmm)
+            continue
+        patterns = (
+            f"{hour}.{minute}",
+            f"{hour}:{minute}",
+            f"{hour_n}.{minute}",
+            f"{hour_n}:{minute}",
+            f"{hour_n}{minute}",
+        )
+        if any(p in dotted or p in compact for p in patterns):
+            found.append(hhmm)
+    return unique(found)
+
+
 def _item_times(item: CorkDriverItem) -> List[str]:
     times = unique(time_to_hhmm(t) for t in re.findall(r"\d{1,2}\.\d{2}", item.cork_duty))
     return times or item.times_hhmm()
@@ -528,11 +557,12 @@ def _best_duty_row(item: CorkDriverItem, rows: Sequence[str]) -> Tuple[str, int,
     best_times: List[str] = []
     best_needles: List[str] = []
     for row in rows:
+        hit_times = times_present_in(row, times)
         norm = normalize_sheet(row)
-        compact = re.sub(r"[^a-z0-9]+", "", norm)
-        hit_times = [t for t in times if t in compact]
         hit_needles = [n for n in needles if n in norm]
-        score = (2 * len(hit_times)) + (3 * len(hit_needles))
+        score = (3 * len(hit_times)) + (3 * len(hit_needles))
+        if times and len(hit_times) == len(times):
+            score += 6
         for train_id in item.train_ids():
             if train_id.lower() in norm:
                 score += 5
@@ -546,41 +576,52 @@ def _best_duty_row(item: CorkDriverItem, rows: Sequence[str]) -> Tuple[str, int,
 
 def compare_item_to_sheet(item: CorkDriverItem, sheet_text: str) -> None:
     rows = extract_duty_rows(sheet_text)
-    sheet = normalize_sheet(sheet_text)
-    compact = re.sub(r"[^a-z0-9]+", "", sheet)
     needles = [n.strip() for n in distinctive_needles(item) if n.strip()]
     times = _item_times(item)
 
-    row, score, hit_times, hit_needles = _best_duty_row(item, rows) if rows else ("", -1, [], [])
+    row, score, row_times, row_needles = _best_duty_row(item, rows) if rows else ("", -1, [], [])
     if row and score > 0:
         item.sheet_match = row[:240]
 
+    found_times = times_present_in(sheet_text, times)
+    sheet_norm = normalize_sheet(sheet_text)
+    found_needles = [n for n in needles if n in sheet_norm]
+    missing_times = [t for t in times if t not in found_times]
+
     for train_id in item.train_ids():
-        if train_id.lower() in sheet:
+        if train_id.lower() in sheet_norm:
             item.sheet_status = "FOUND"
             item.sheet_note = f"train ID {train_id}"
-            if not item.sheet_match:
-                item.sheet_match = row[:240]
             return
 
-    found_times = hit_times or [t for t in times if t in compact]
-    found_needles = hit_needles or [n for n in needles if n in sheet]
+    place_ok = (not needles) or bool(found_needles)
 
-    if found_times and found_needles:
+    if times and not missing_times and place_ok:
+        bits = [", ".join(found_times)]
+        if found_needles:
+            bits.append(found_needles[0])
         item.sheet_status = "FOUND"
-        item.sheet_note = f"{', '.join(found_times)} and {found_needles[0]}"
+        item.sheet_note = " and ".join(bits)
+        if not item.sheet_match and row:
+            item.sheet_match = row[:240]
         return
-    if found_times and not needles:
-        item.sheet_status = "FOUND"
-        item.sheet_note = f"time {found_times[0]} (check station by eye)"
-        return
-    if found_times and not found_needles:
+
+    if missing_times and found_times:
         item.sheet_status = "MISSING"
         item.sheet_note = (
-            f"time {found_times[0]} is on the sheet, but not with "
-            f"{needles[0] if needles else 'the altered working'}"
+            f"on sheet: {', '.join(found_times)}; "
+            f"missing {', '.join(missing_times)}"
+            + (f" / {needles[0]}" if needles and not found_needles else "")
         )
         return
+
+    if found_times and needles and not found_needles:
+        item.sheet_status = "MISSING"
+        item.sheet_note = (
+            f"time {', '.join(found_times)} is on the sheet, but not with {needles[0]}"
+        )
+        return
+
     item.sheet_status = "MISSING"
     item.sheet_note = "not found in Job Analysis"
     if not item.sheet_match:
