@@ -25,7 +25,9 @@ from cork_driver_checker import (
 st.set_page_config(page_title="Cork Driver Checker", layout="centered")
 
 st.title("Cork Driver Checker")
-st.caption("One day at a time: Monday circular against Monday sheet.")
+st.caption(
+    "One day at a time. Compare needs both times (e.g. 0540 and 1047) plus the station (Portlaoise)."
+)
 
 day = st.selectbox("Which day?", DAYS, index=0)
 
