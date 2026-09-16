@@ -16,6 +16,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import os
 import re
 import sys
@@ -161,6 +163,7 @@ class CorkDriverItem:
     carry_forward: List[str] = field(default_factory=list)
     sheet_status: str = "NOT CHECKED"
     sheet_note: str = ""
+    sheet_match: str = ""
 
     def times_hhmm(self) -> List[str]:
         blob = " ".join(
@@ -488,6 +491,19 @@ def normalize_sheet(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
+def extract_duty_rows(sheet_text: str) -> List[str]:
+    rows = []
+    for raw in sheet_text.splitlines():
+        line = flatten(raw)
+        if len(line) < 8:
+            continue
+        if re.search(r"name of driver|job analysis|locomotive drivers", line, re.IGNORECASE):
+            continue
+        if line not in rows:
+            rows.append(line)
+    return rows
+
+
 def distinctive_needles(item: CorkDriverItem) -> List[str]:
     blob = (item.cork_duty + " " + " ".join(t.label() for t in item.related_trains)).lower()
     needles = []
@@ -499,22 +515,56 @@ def distinctive_needles(item: CorkDriverItem) -> List[str]:
     return unique(needles)
 
 
+def _item_times(item: CorkDriverItem) -> List[str]:
+    times = unique(time_to_hhmm(t) for t in re.findall(r"\d{1,2}\.\d{2}", item.cork_duty))
+    return times or item.times_hhmm()
+
+
+def _best_duty_row(item: CorkDriverItem, rows: Sequence[str]) -> Tuple[str, int, List[str], List[str]]:
+    times = _item_times(item)
+    needles = [n.strip() for n in distinctive_needles(item) if n.strip()]
+    best_row = ""
+    best_score = -1
+    best_times: List[str] = []
+    best_needles: List[str] = []
+    for row in rows:
+        norm = normalize_sheet(row)
+        compact = re.sub(r"[^a-z0-9]+", "", norm)
+        hit_times = [t for t in times if t in compact]
+        hit_needles = [n for n in needles if n in norm]
+        score = (2 * len(hit_times)) + (3 * len(hit_needles))
+        for train_id in item.train_ids():
+            if train_id.lower() in norm:
+                score += 5
+        if score > best_score:
+            best_score = score
+            best_row = flatten(row)
+            best_times = hit_times
+            best_needles = hit_needles
+    return best_row, best_score, best_times, best_needles
+
+
 def compare_item_to_sheet(item: CorkDriverItem, sheet_text: str) -> None:
+    rows = extract_duty_rows(sheet_text)
     sheet = normalize_sheet(sheet_text)
     compact = re.sub(r"[^a-z0-9]+", "", sheet)
+    needles = [n.strip() for n in distinctive_needles(item) if n.strip()]
+    times = _item_times(item)
+
+    row, score, hit_times, hit_needles = _best_duty_row(item, rows) if rows else ("", -1, [], [])
+    if row and score > 0:
+        item.sheet_match = row[:240]
 
     for train_id in item.train_ids():
         if train_id.lower() in sheet:
             item.sheet_status = "FOUND"
             item.sheet_note = f"train ID {train_id}"
+            if not item.sheet_match:
+                item.sheet_match = row[:240]
             return
 
-    duty_times = unique(time_to_hhmm(t) for t in re.findall(r"\d{1,2}\.\d{2}", item.cork_duty))
-    if not duty_times:
-        duty_times = item.times_hhmm()
-    found_times = [t for t in duty_times if t in compact]
-    needles = distinctive_needles(item)
-    found_needles = [n.strip() for n in needles if n.strip() and n.strip() in sheet]
+    found_times = hit_times or [t for t in times if t in compact]
+    found_needles = hit_needles or [n for n in needles if n in sheet]
 
     if found_times and found_needles:
         item.sheet_status = "FOUND"
@@ -533,6 +583,8 @@ def compare_item_to_sheet(item: CorkDriverItem, sheet_text: str) -> None:
         return
     item.sheet_status = "MISSING"
     item.sheet_note = "not found in Job Analysis"
+    if not item.sheet_match:
+        item.sheet_match = ""
 
 
 def find_week_dirs(root: Path) -> List[Path]:
@@ -668,6 +720,98 @@ def format_checklist(
     return "\n".join(lines)
 
 
+def format_compare_report(
+    day: str,
+    pdf_name: str,
+    sheet_name: str,
+    items: Sequence[CorkDriverItem],
+    carry: Sequence[str],
+) -> str:
+    missing = [item for item in items if item.sheet_status == "MISSING"]
+    found = [item for item in items if item.sheet_status == "FOUND"]
+    other = [item for item in items if item.sheet_status not in {"MISSING", "FOUND"}]
+    lines = [
+        f"{day.upper()} COMPARE - circular vs daily sheet",
+        f"Circular PDF: {pdf_name}",
+        f"Daily sheet: {sheet_name}",
+        f"Missing: {len(missing)}   Found: {len(found)}   Total: {len(items)}",
+        "=" * 72,
+        "",
+        "MISSING (put these on the daily sheet)",
+        "-" * 72,
+    ]
+    if not missing:
+        lines.append("None. Every Cork Driver item was found on the sheet.")
+        lines.append("")
+    else:
+        for index, item in enumerate(missing, 1):
+            lines.append(f"{index}. FROM CIRCULAR:")
+            lines.append(f"   {item.cork_duty}")
+            lines.append(f"   Look for: {look_for_on_sheet(item)}")
+            lines.append(f"   ON DAILY SHEET: {item.sheet_match or 'not found'}")
+            if item.sheet_note:
+                lines.append(f"   Note: {item.sheet_note}")
+            lines.append("")
+
+    lines += ["FOUND (already on the daily sheet)", "-" * 72]
+    if not found:
+        lines.append("None.")
+        lines.append("")
+    else:
+        for index, item in enumerate(found, 1):
+            lines.append(f"{index}. FROM CIRCULAR:")
+            lines.append(f"   {item.cork_duty}")
+            lines.append(f"   Look for: {look_for_on_sheet(item)}")
+            lines.append(f"   ON DAILY SHEET: {item.sheet_match or item.sheet_note or 'matched'}")
+            lines.append("")
+
+    if other:
+        lines += ["NOT CHECKED", "-" * 72]
+        for item in other:
+            lines.append(f"- {item.cork_duty}")
+        lines.append("")
+
+    lines += ["CARRY FORWARD (not this day's sheet)", "-" * 72]
+    if carry:
+        for note in carry:
+            lines.append(f"  - {note}")
+    else:
+        lines.append("  None found.")
+    lines.append("")
+    lines.append("Missing = go look at the sheet. Times on the sheet can still be the old working.")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def format_compare_csv(
+    day: str,
+    items: Sequence[CorkDriverItem],
+    carry: Sequence[str],
+) -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        ["Day", "Status", "From circular", "Look on sheet for", "On daily sheet", "Note"]
+    )
+    missing = [item for item in items if item.sheet_status == "MISSING"]
+    found = [item for item in items if item.sheet_status == "FOUND"]
+    other = [item for item in items if item.sheet_status not in {"MISSING", "FOUND"}]
+    for item in missing + found + other:
+        writer.writerow(
+            [
+                day,
+                item.sheet_status,
+                item.cork_duty,
+                look_for_on_sheet(item),
+                item.sheet_match,
+                item.sheet_note,
+            ]
+        )
+    for note in carry:
+        writer.writerow([day, "CARRY FORWARD", note, "", "", ""])
+    return buffer.getvalue()
+
+
 def write_checklist(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
@@ -747,6 +891,18 @@ def process_day(
     write_checklist(out_path, content)
     print(content)
     print(f"Saved: {out_path}")
+    if sheet_path:
+        compare = format_compare_report(
+            day, pdf_path.name, sheet_path.name, items, carry
+        )
+        compare_path = week_dir / f"{day}_Cork_Driver_compare.txt"
+        write_checklist(compare_path, compare)
+        csv_path = week_dir / f"{day}_Cork_Driver_compare.csv"
+        write_checklist(csv_path, format_compare_csv(day, items, carry))
+        print(compare)
+        print(f"Saved: {compare_path}")
+        print(f"Saved: {csv_path}")
+        out_path = compare_path
     print()
     try:
         os.startfile(str(out_path))

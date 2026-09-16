@@ -4,6 +4,8 @@ WEEK-ENDING*/
 *.docx
 *.docm
 *_Cork_Driver_checklist.txt
+*_Cork_Driver_compare.txt
+*_Cork_Driver_compare.csv
 
 # Built apps
 *.exe

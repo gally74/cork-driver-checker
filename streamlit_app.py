@@ -1,7 +1,7 @@
 """Browser checker for Cork Driver crew arrangements.
 
-Upload one day's circular PDF (Monday_pages.pdf, etc.).
-Optionally upload that day's Word daily sheet to mark Found/Missing.
+Upload one day's circular PDF. Optionally upload that day's Word daily sheet
+to compare circular items against Job Analysis.
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ from cork_driver_checker import (
     DAYS,
     compare_item_to_sheet,
     format_checklist,
+    format_compare_csv,
+    format_compare_report,
     parse_day_pdf,
     read_word_text,
 )
@@ -33,14 +35,14 @@ pdf_file = st.file_uploader(
 )
 
 sheet_file = st.file_uploader(
-    "Optional: that day's Word daily sheet",
+    "Optional: that day's Word daily sheet (for compare)",
     type=["docx", "docm"],
 )
 
-run = st.button("Build checklist", type="primary", disabled=pdf_file is None)
+button_label = "Compare circular and daily sheet" if sheet_file else "Build checklist"
+run = st.button(button_label, type="primary", disabled=pdf_file is None)
 
 if run and pdf_file is not None:
-    suffix = Path(pdf_file.name).suffix or ".pdf"
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         pdf_path = tmp_dir / f"{day}_pages.pdf"
@@ -59,36 +61,91 @@ if run and pdf_file is not None:
                     compare_item_to_sheet(item, sheet_text)
             week_dir = Path(pdf_file.name)
             checklist = format_checklist(day, week_dir, items, carry, sheet_path)
+            compare = ""
+            compare_csv = ""
+            if sheet_path:
+                compare = format_compare_report(
+                    day, pdf_file.name, sheet_file.name, items, carry
+                )
+                compare_csv = format_compare_csv(day, items, carry)
         except Exception as exc:
-            st.error(f"Could not read that PDF. {exc}")
+            st.error(f"Could not read those files. {exc}")
             st.stop()
 
-    missing = sum(1 for item in items if item.sheet_status == "MISSING")
-    found = sum(1 for item in items if item.sheet_status == "FOUND")
+    missing_items = [item for item in items if item.sheet_status == "MISSING"]
+    found_items = [item for item in items if item.sheet_status == "FOUND"]
 
     if sheet_path:
-        st.success(f"{len(items)} Cork Driver item(s). {found} found, {missing} missing.")
+        if missing_items:
+            st.error(
+                f"{len(missing_items)} missing on the daily sheet, "
+                f"{len(found_items)} found, {len(items)} total."
+            )
+        else:
+            st.success(f"All {len(items)} Cork Driver item(s) were found on the daily sheet.")
+
+        st.download_button(
+            f"Download {day} compare (.txt)",
+            data=compare.encode("utf-8"),
+            file_name=f"{day}_Cork_Driver_compare.txt",
+            mime="text/plain",
+            key="download_compare_txt",
+        )
+        st.download_button(
+            f"Download {day} compare (.csv)",
+            data=compare_csv.encode("utf-8"),
+            file_name=f"{day}_Cork_Driver_compare.csv",
+            mime="text/csv",
+            key="download_compare_csv",
+        )
+
+        st.subheader("Missing")
+        if not missing_items:
+            st.write("None.")
+        else:
+            for item in missing_items:
+                st.markdown(
+                    f"**Circular:** {item.cork_duty}  \n"
+                    f"**On daily sheet:** {item.sheet_match or 'not found'}  \n"
+                    f"**Note:** {item.sheet_note}"
+                )
+
+        st.subheader("Found")
+        if not found_items:
+            st.write("None.")
+        else:
+            for item in found_items:
+                st.markdown(
+                    f"**Circular:** {item.cork_duty}  \n"
+                    f"**On daily sheet:** {item.sheet_match or item.sheet_note}"
+                )
+
+        if carry:
+            st.subheader("Carry forward")
+            for note in carry:
+                st.write(f"- {note}")
+
+        st.text_area("Full compare", compare, height=360)
     else:
         st.info(
             f"{len(items)} Cork Driver item(s). "
-            "No daily sheet uploaded, so tick these by hand while you build Monday."
+            "Upload the Word daily sheet as well to compare Found / Missing."
         )
-
-    st.download_button(
-        f"Download {day}_Cork_Driver_checklist.txt",
-        data=checklist.encode("utf-8"),
-        file_name=f"{day}_Cork_Driver_checklist.txt",
-        mime="text/plain",
-    )
-    st.text_area("Checklist", checklist, height=420)
+        st.download_button(
+            f"Download {day}_Cork_Driver_checklist.txt",
+            data=checklist.encode("utf-8"),
+            file_name=f"{day}_Cork_Driver_checklist.txt",
+            mime="text/plain",
+        )
+        st.text_area("Checklist", checklist, height=420)
 
 st.divider()
 st.markdown(
     """
 **How to use each week**
 1. Pick the day (start with Monday).
-2. Upload that day's pages PDF from the weekly circular split.
-3. Click **Build checklist** and tick the items onto the daily sheet.
-4. After the Word sheet is saved, upload it too to mark Found / Missing.
+2. Upload that day's pages PDF.
+3. To compare, also upload that day's Word daily sheet.
+4. Download the compare file. **Missing** items still need to go on the sheet.
 """
 )
