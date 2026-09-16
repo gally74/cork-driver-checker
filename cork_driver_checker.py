@@ -453,6 +453,20 @@ def merge_items(items: Sequence[CorkDriverItem]) -> Tuple[List[CorkDriverItem], 
     return merged, unique(all_carry)
 
 
+def collapse_repeated_cells(line: str) -> str:
+    """Word tables often repeat merged Job Analysis cells. Keep each part once."""
+    line = line.replace("\x07", "").replace("\u00a0", " ")
+    parts = [flatten(part) for part in re.split(r"\s*\|\s*", line)]
+    collapsed = []
+    for part in parts:
+        if not part:
+            continue
+        if part in collapsed:
+            continue
+        collapsed.append(part)
+    return " | ".join(collapsed)
+
+
 def read_word_text(sheet_path: Path) -> str:
     suffix = sheet_path.suffix.lower()
     if suffix in {".docx", ".docm"}:
@@ -460,11 +474,17 @@ def read_word_text(sheet_path: Path) -> str:
             import docx  # type: ignore
 
             document = docx.Document(str(sheet_path))
-            bits = [para.text for para in document.paragraphs]
+            bits = [collapse_repeated_cells(para.text) for para in document.paragraphs]
             for table in document.tables:
                 for row in table.rows:
-                    bits.append(" | ".join(cell.text for cell in row.cells))
-            return "\n".join(bits)
+                    cells = []
+                    for cell in row.cells:
+                        text = flatten(cell.text.replace("\x07", ""))
+                        if text and text not in cells:
+                            cells.append(text)
+                    if cells:
+                        bits.append(" | ".join(cells))
+            return "\n".join(bit for bit in bits if bit)
         except Exception:
             pass
 
@@ -496,7 +516,7 @@ def normalize_sheet(text: str) -> str:
 def extract_duty_rows(sheet_text: str) -> List[str]:
     rows = []
     for raw in sheet_text.splitlines():
-        line = flatten(raw)
+        line = collapse_repeated_cells(flatten(raw))
         if len(line) < 8:
             continue
         if re.search(r"name of driver|job analysis|locomotive drivers", line, re.IGNORECASE):
@@ -568,7 +588,7 @@ def _best_duty_row(item: CorkDriverItem, rows: Sequence[str]) -> Tuple[str, int,
                 score += 5
         if score > best_score:
             best_score = score
-            best_row = flatten(row)
+            best_row = collapse_repeated_cells(flatten(row))
             best_times = hit_times
             best_needles = hit_needles
     return best_row, best_score, best_times, best_needles
@@ -581,7 +601,7 @@ def compare_item_to_sheet(item: CorkDriverItem, sheet_text: str) -> None:
 
     row, score, row_times, row_needles = _best_duty_row(item, rows) if rows else ("", -1, [], [])
     if row and score > 0:
-        item.sheet_match = row[:240]
+        item.sheet_match = collapse_repeated_cells(row)[:300]
 
     found_times = times_present_in(sheet_text, times)
     sheet_norm = normalize_sheet(sheet_text)
@@ -603,7 +623,7 @@ def compare_item_to_sheet(item: CorkDriverItem, sheet_text: str) -> None:
         item.sheet_status = "FOUND"
         item.sheet_note = " and ".join(bits)
         if not item.sheet_match and row:
-            item.sheet_match = row[:240]
+            item.sheet_match = collapse_repeated_cells(row)[:300]
         return
 
     if missing_times and found_times:
