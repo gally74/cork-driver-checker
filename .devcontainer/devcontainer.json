@@ -1,0 +1,13 @@
+{
+  "name": "Cork Driver Checker",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "postCreateCommand": "pip install -r requirements.txt",
+  "forwardPorts": [8501],
+  "portsAttributes": {
+    "8501": {
+      "label": "Cork Driver Checker",
+      "onAutoForward": "openPreview"
+    }
+  },
+  "postStartCommand": "streamlit run streamlit_app.py --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false"
+}

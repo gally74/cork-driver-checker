@@ -1,0 +1,24 @@
+# Confidential circulars and daily sheets — never push these
+WEEK-ENDING*/
+*.pdf
+*.docx
+*.docm
+*_Cork_Driver_checklist.txt
+
+# Built apps
+*.exe
+dist/
+build/
+*.spec
+
+# Python
+__pycache__/
+.venv/
+venv/
+*.pyc
+
+# Editor / OS
+.cursor/
+.vscode/
+Thumbs.db
+Desktop.ini
