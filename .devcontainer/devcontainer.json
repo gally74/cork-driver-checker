@@ -6,8 +6,10 @@
   "portsAttributes": {
     "8501": {
       "label": "Cork Driver Checker",
-      "onAutoForward": "openPreview"
+      "onAutoForward": "notify",
+      "visibility": "public",
+      "requireLocalPort": true
     }
   },
-  "postStartCommand": "streamlit run streamlit_app.py --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false"
+  "postStartCommand": "streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501 --server.headless true --server.enableCORS false --server.enableXsrfProtection false --browser.gatherUsageStats false"
 }
