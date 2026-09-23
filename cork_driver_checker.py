@@ -207,16 +207,15 @@ def time_to_hhmm(value: str) -> str:
     return f"{int(hours):02d}{minutes}"
 
 
-def extract_pdf_text(pdf_path: Path) -> str:
+def extract_pdf_pages(pdf_path: Path) -> List[str]:
+    """Return text for each page (1 entry per page)."""
     try:
         import fitz  # type: ignore
 
         doc = fitz.open(str(pdf_path))
-        pages = []
-        for page in doc:
-            pages.append(page.get_text("text") or "")
+        pages = [(page.get_text("text") or "") for page in doc]
         doc.close()
-        return "\n".join(pages)
+        return pages
     except Exception:
         pass
 
@@ -228,12 +227,44 @@ def extract_pdf_text(pdf_path: Path) -> str:
             "Install with:  py -3 -m pip install pymupdf PyPDF2 python-docx"
         ) from exc
 
-    parts = []
+    pages = []
     with open(pdf_path, "rb") as handle:
         reader = PyPDF2.PdfReader(handle)
         for page in reader.pages:
-            parts.append(page.extract_text() or "")
-    return "\n".join(parts)
+            pages.append(page.extract_text() or "")
+    return pages
+
+
+def extract_pdf_text(pdf_path: Path) -> str:
+    return "\n".join(extract_pdf_pages(pdf_path))
+
+
+def detect_day_label(text: str) -> str:
+    """Return Monday..Sunday if a day heading is found near the start of the text."""
+    head = "\n".join(text.splitlines()[:25])
+    match = re.search(
+        r"\b(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY)\b"
+        r"(?:\s+\d{1,2}(?:ST|ND|RD|TH)?\b)?",
+        head,
+        re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    return match.group(1).capitalize()
+
+
+def split_circular_by_day(pdf_path: Path) -> dict:
+    """Group full weekly circular pages into Monday..Sunday text blobs."""
+    pages = extract_pdf_pages(pdf_path)
+    by_day = {day: [] for day in DAYS}
+    current = ""
+    for page_text in pages:
+        found = detect_day_label(page_text)
+        if found:
+            current = found
+        if current:
+            by_day[current].append(page_text)
+    return {day: "\n".join(parts) for day, parts in by_day.items() if parts}
 
 
 def extract_heading_trains(preceding: str) -> List[TrainRef]:
@@ -321,7 +352,7 @@ def is_useful_carry(snippet: str) -> bool:
     if re.search(r"\boff\s+(Spl|Reg|Ety)\b", snippet, re.IGNORECASE):
         return False
     if not re.search(
-        r"cork|thurles|killarney|mallow|tralee|charleville|portarlington|limerick jct",
+        r"cork|thurles|killarney|mallow|tralee|charleville|portarlington|portlaoise|limerick jct",
         snippet,
         re.IGNORECASE,
     ):
@@ -358,10 +389,9 @@ def carry_forward_notes(section_text: str, current_day: str) -> List[str]:
     return unique(notes)
 
 
-def parse_day_pdf(pdf_path: Path, day: str) -> Tuple[List[CorkDriverItem], List[str]]:
-    text = extract_pdf_text(pdf_path)
+def parse_day_text(text: str, day: str, source_name: str = "") -> Tuple[List[CorkDriverItem], List[str]]:
     if not text.strip():
-        raise SystemExit(f"No text could be read from {pdf_path}")
+        return [], []
 
     chunks = re.split(r"(CREW ARRANGEMENTS:)", text, flags=re.IGNORECASE)
     items: List[CorkDriverItem] = []
@@ -395,12 +425,11 @@ def parse_day_pdf(pdf_path: Path, day: str) -> Tuple[List[CorkDriverItem], List[
                 heading_title=title,
                 related_trains=trains,
                 circular_page=page,
-                source_pdf=pdf_path.name,
+                source_pdf=source_name,
                 carry_forward=carry,
             )
         )
 
-    # Fallback: Cork Driver hits that the crew-split missed
     covered = flatten(" ".join(item.cork_duty for item in items)).lower()
     for match in CORK_DRIVER_RE.finditer(text):
         window = flatten(text[max(0, match.start() - 400): match.end() + 280])
@@ -415,11 +444,18 @@ def parse_day_pdf(pdf_path: Path, day: str) -> Tuple[List[CorkDriverItem], List[
             CorkDriverItem(
                 day=day,
                 cork_duty=snippet[0],
-                source_pdf=pdf_path.name,
+                source_pdf=source_name,
             )
         )
 
     return merge_items(items)
+
+
+def parse_day_pdf(pdf_path: Path, day: str) -> Tuple[List[CorkDriverItem], List[str]]:
+    text = extract_pdf_text(pdf_path)
+    if not text.strip():
+        raise SystemExit(f"No text could be read from {pdf_path}")
+    return parse_day_text(text, day, source_name=pdf_path.name)
 
 
 def merge_items(items: Sequence[CorkDriverItem]) -> Tuple[List[CorkDriverItem], List[str]]:
@@ -467,6 +503,30 @@ def collapse_repeated_cells(line: str) -> str:
     return " | ".join(collapsed)
 
 
+def extract_docm_text(path: Path) -> str:
+    """Read .docm/.docx via the Office Open XML zip (works when python-docx rejects .docm)."""
+    import zipfile
+
+    with zipfile.ZipFile(path) as archive:
+        xml = archive.read("word/document.xml").decode("utf-8", errors="ignore")
+    text = re.sub(r"</w:p>", "\n", xml)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = (
+        text.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", '"')
+        .replace("&#8211;", "-")
+        .replace("&#8212;", "-")
+    )
+    lines = []
+    for raw in text.splitlines():
+        line = collapse_repeated_cells(flatten(raw))
+        if line:
+            lines.append(line)
+    return "\n".join(lines)
+
+
 def read_word_text(sheet_path: Path) -> str:
     suffix = sheet_path.suffix.lower()
     if suffix in {".docx", ".docm"}:
@@ -484,7 +544,14 @@ def read_word_text(sheet_path: Path) -> str:
                             cells.append(text)
                     if cells:
                         bits.append(" | ".join(cells))
-            return "\n".join(bit for bit in bits if bit)
+            joined = "\n".join(bit for bit in bits if bit)
+            if joined.strip():
+                return joined
+        except Exception:
+            pass
+
+        try:
+            return extract_docm_text(sheet_path)
         except Exception:
             pass
 
@@ -505,6 +572,37 @@ def read_word_text(sheet_path: Path) -> str:
             "Install python-docx with:  py -3 -m pip install python-docx\n"
             f"Details: {exc}"
         )
+
+
+DAY_HEADING_RE = re.compile(
+    r"^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"
+    r"(?:\s+\d{1,2}(?:st|nd|rd|th)?\b.*)?$",
+    re.IGNORECASE,
+)
+
+
+def split_weekly_sheet_by_day(sheet_text: str) -> dict:
+    """Split a Mon-Sun weekly duty sheet into per-day text blocks."""
+    by_day = {day: [] for day in DAYS}
+    current = ""
+    for raw in sheet_text.splitlines():
+        line = flatten(raw)
+        if not line:
+            continue
+        match = DAY_HEADING_RE.match(line)
+        if match:
+            current = match.group(1).capitalize()
+            by_day[current].append(line)
+            continue
+        # Also catch uppercase-only headings like "SATURDAY" alone
+        upper = line.upper().strip()
+        if upper in {d.upper() for d in DAYS}:
+            current = upper.capitalize()
+            by_day[current].append(line)
+            continue
+        if current:
+            by_day[current].append(line)
+    return {day: "\n".join(parts) for day, parts in by_day.items() if parts}
 
 
 def normalize_sheet(text: str) -> str:
@@ -873,6 +971,155 @@ def format_compare_csv(
     return buffer.getvalue()
 
 
+def run_week_compare(
+    circular_pdf: Path,
+    weekly_sheet: Path,
+) -> Tuple[dict, dict, str, str]:
+    """
+    Full circular + Mon-Sun weekly Word sheet.
+    Returns (items_by_day, carry_by_day, report_text, csv_text).
+    """
+    day_texts = split_circular_by_day(circular_pdf)
+    if not day_texts:
+        raise SystemExit(f"Could not find day sections in {circular_pdf.name}")
+
+    sheet_text = read_word_text(weekly_sheet)
+    sheet_by_day = split_weekly_sheet_by_day(sheet_text)
+
+    items_by_day = {}
+    carry_by_day = {}
+    for day in DAYS:
+        text = day_texts.get(day, "")
+        if not text.strip():
+            items_by_day[day] = []
+            carry_by_day[day] = []
+            continue
+        items, carry = parse_day_text(text, day, source_name=circular_pdf.name)
+        day_sheet = sheet_by_day.get(day, "")
+        if day_sheet:
+            for item in items:
+                compare_item_to_sheet(item, day_sheet)
+        else:
+            for item in items:
+                item.sheet_status = "MISSING"
+                item.sheet_note = f"no {day} block found on weekly sheet"
+        items_by_day[day] = items
+        carry_by_day[day] = carry
+
+    report = format_week_compare_report(
+        circular_pdf.name, weekly_sheet.name, items_by_day, carry_by_day, sheet_by_day
+    )
+    csv_text = format_week_compare_csv(items_by_day, carry_by_day)
+    return items_by_day, carry_by_day, report, csv_text
+
+
+def format_week_compare_report(
+    circular_name: str,
+    sheet_name: str,
+    items_by_day: dict,
+    carry_by_day: dict,
+    sheet_by_day: dict,
+) -> str:
+    total_items = sum(len(v) for v in items_by_day.values())
+    total_missing = sum(
+        1 for items in items_by_day.values() for item in items if item.sheet_status == "MISSING"
+    )
+    total_found = sum(
+        1 for items in items_by_day.values() for item in items if item.sheet_status == "FOUND"
+    )
+    lines = [
+        "WEEK COMPARE - circular vs weekly daily sheet",
+        f"Circular PDF: {circular_name}",
+        f"Weekly sheet: {sheet_name}",
+        f"Missing: {total_missing}   Found: {total_found}   Total: {total_items}",
+        "=" * 72,
+        "",
+        "SUMMARY BY DAY",
+        "-" * 72,
+    ]
+    for day in DAYS:
+        items = items_by_day.get(day, [])
+        missing = sum(1 for item in items if item.sheet_status == "MISSING")
+        found = sum(1 for item in items if item.sheet_status == "FOUND")
+        sheet_ok = "yes" if sheet_by_day.get(day) else "NO SHEET BLOCK"
+        lines.append(
+            f"{day:10}  items {len(items):2}   found {found:2}   missing {missing:2}   sheet: {sheet_ok}"
+        )
+    lines += ["", "MISSING (put these on the weekly sheet)", "-" * 72]
+    miss_n = 0
+    for day in DAYS:
+        for item in items_by_day.get(day, []):
+            if item.sheet_status != "MISSING":
+                continue
+            miss_n += 1
+            lines.append(f"{miss_n}. [{day}] FROM CIRCULAR:")
+            lines.append(f"   {item.cork_duty}")
+            lines.append(f"   Look for: {look_for_on_sheet(item)}")
+            lines.append(f"   ON DAILY SHEET: {item.sheet_match or 'not found'}")
+            if item.sheet_note:
+                lines.append(f"   Note: {item.sheet_note}")
+            lines.append("")
+    if miss_n == 0:
+        lines.append("None. Every Cork Driver item was found on the weekly sheet.")
+        lines.append("")
+
+    lines += ["FOUND (already on the weekly sheet)", "-" * 72]
+    found_n = 0
+    for day in DAYS:
+        for item in items_by_day.get(day, []):
+            if item.sheet_status != "FOUND":
+                continue
+            found_n += 1
+            lines.append(f"{found_n}. [{day}] FROM CIRCULAR:")
+            lines.append(f"   {item.cork_duty}")
+            lines.append(f"   Look for: {look_for_on_sheet(item)}")
+            lines.append(f"   ON DAILY SHEET: {item.sheet_match or item.sheet_note or 'matched'}")
+            lines.append("")
+    if found_n == 0:
+        lines.append("None.")
+        lines.append("")
+
+    lines += ["CARRY FORWARD", "-" * 72]
+    any_carry = False
+    for day in DAYS:
+        for note in carry_by_day.get(day, []):
+            any_carry = True
+            lines.append(f"  [{day}] {note}")
+    if not any_carry:
+        lines.append("  None found.")
+    lines.append("")
+    lines.append("Missing = go look at the sheet. Times on the sheet can still be the old working.")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def format_week_compare_csv(items_by_day: dict, carry_by_day: dict) -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        ["Day", "Status", "From circular", "Look on sheet for", "On daily sheet", "Note"]
+    )
+    for day in DAYS:
+        items = items_by_day.get(day, [])
+        missing = [item for item in items if item.sheet_status == "MISSING"]
+        found = [item for item in items if item.sheet_status == "FOUND"]
+        other = [item for item in items if item.sheet_status not in {"MISSING", "FOUND"}]
+        for item in missing + found + other:
+            writer.writerow(
+                [
+                    day,
+                    item.sheet_status,
+                    item.cork_duty,
+                    look_for_on_sheet(item),
+                    item.sheet_match,
+                    item.sheet_note,
+                ]
+            )
+        for note in carry_by_day.get(day, []):
+            writer.writerow([day, "CARRY FORWARD", note, "", "", ""])
+    return buffer.getvalue()
+
+
 def write_checklist(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
@@ -977,11 +1224,19 @@ def process_day(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Extract Cork Driver crew arrangements from one day's circular pages."
+        description="Cork Driver checker: one day, or full circular vs weekly sheet."
     )
     parser.add_argument("--week", help="Week folder name, or part of it (e.g. 27TH SEPTEMBER)")
     parser.add_argument("--day", help="Monday, Tuesday, ... or all")
     parser.add_argument("--sheet", help="Path to that day's Word daily sheet")
+    parser.add_argument(
+        "--full-circular",
+        help="Full weekly circular PDF (e.g. 4255.pdf) for whole-week mode",
+    )
+    parser.add_argument(
+        "--weekly-sheet",
+        help="Mon-Sun weekly Word daily sheet (e.g. 21 Sep to 27 Sep.docm)",
+    )
     parser.add_argument(
         "--root",
         help="Folder that contains the WEEK-ENDING folders",
@@ -994,6 +1249,46 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     roots = [Path(args.root)] if args.root else search_roots()
     print("Cork Driver Checker")
     print("=" * 40)
+
+    if args.full_circular or args.weekly_sheet:
+        if not args.full_circular or not args.weekly_sheet:
+            raise SystemExit("Whole-week mode needs both --full-circular and --weekly-sheet")
+        circular = Path(args.full_circular)
+        weekly = Path(args.weekly_sheet)
+        if not circular.is_file():
+            for root in roots:
+                candidate = root / args.full_circular
+                if candidate.is_file():
+                    circular = candidate
+                    break
+        if not weekly.is_file():
+            for root in roots:
+                candidate = root / args.weekly_sheet
+                if candidate.is_file():
+                    weekly = candidate
+                    break
+        if not circular.is_file():
+            raise SystemExit(f"Circular PDF not found: {args.full_circular}")
+        if not weekly.is_file():
+            raise SystemExit(f"Weekly sheet not found: {args.weekly_sheet}")
+
+        print("Whole week: full circular -> Mon-Sun weekly sheet.")
+        print()
+        items_by_day, carry_by_day, report, csv_text = run_week_compare(circular, weekly)
+        out_dir = circular.parent
+        report_path = out_dir / "Week_Cork_Driver_compare.txt"
+        csv_path = out_dir / "Week_Cork_Driver_compare.csv"
+        write_checklist(report_path, report)
+        write_checklist(csv_path, csv_text)
+        print(report)
+        print(f"Saved: {report_path}")
+        print(f"Saved: {csv_path}")
+        try:
+            os.startfile(str(report_path))
+        except Exception:
+            pass
+        return 0
+
     print("Checks one day at a time (Monday circular -> Monday sheet).")
     print()
     week_dir = resolve_week_dir(roots, args.week)
