@@ -1,15 +1,14 @@
 {
   "name": "Cork Driver Checker",
   "image": "mcr.microsoft.com/devcontainers/python:3.12",
-  "postCreateCommand": "pip install -r requirements.txt",
+  "postCreateCommand": "pip install -r requirements.txt && chmod +x start_checker.sh",
   "forwardPorts": [8501],
   "portsAttributes": {
     "8501": {
       "label": "Cork Driver Checker",
       "onAutoForward": "notify",
-      "visibility": "public",
-      "requireLocalPort": true
+      "visibility": "public"
     }
   },
-  "postStartCommand": "streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501 --server.headless true --server.enableCORS false --server.enableXsrfProtection false --browser.gatherUsageStats false"
+  "postStartCommand": "bash start_checker.sh"
 }
