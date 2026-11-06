@@ -29,6 +29,7 @@ from possession_extract import (
     extract_possessions_from_pdfs,
     format_possessions_for_day,
     format_possessions_simple,
+    prepare_slots,
 )
 
 
@@ -138,6 +139,12 @@ elif mode == "Extract possessions":
             "Filters output only. Source PDF should still be Sunday pages / full circular."
         ),
     )
+    major_only = st.checkbox(
+        "Main / overnight only (skip short daytime plant windows)",
+        value=False,
+        key="poss_major",
+        help="Same option as Excel Scan Possessions — keeps Up & Down and overnight blocks.",
+    )
     run_poss = st.button(
         "Extract possessions",
         type="primary",
@@ -159,18 +166,22 @@ elif mode == "Extract possessions":
                 st.error(f"Could not read possessions from that PDF. {exc}")
                 st.stop()
 
+        # Same prepare/format pipeline as Excel (overnight merge + optional major-only)
+        shown = prepare_slots(slots, major_only=major_only)
         if day_choice == "Whole week":
-            paste_text = format_possessions_simple(slots)
+            paste_text = format_possessions_simple(slots, major_only=major_only)
         else:
-            paste_text = format_possessions_for_day(day_choice, slots)
+            paste_text = format_possessions_for_day(
+                day_choice, slots, major_only=major_only
+            )
 
         st.success(
-            f"Found {len(slots)} Cork-area possession slot(s). "
-            "Copy below into Word (after circular notes)."
+            f"Showing {len(shown)} slot(s) after overnight merge"
+            + (" (main / overnight only)." if major_only else ".")
+            + " Same text as Cork Roster Scan Possessions."
         )
-        # Quick counts by day
         for d in DAYS:
-            n = sum(1 for s in slots if s.day == d)
+            n = sum(1 for s in shown if s.day == d)
             if n:
                 st.write(f"**{d}:** {n}")
 
