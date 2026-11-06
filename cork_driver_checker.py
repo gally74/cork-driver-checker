@@ -826,6 +826,92 @@ def look_for_on_sheet(item: CorkDriverItem) -> str:
     return ", ".join(bits) if bits else "Cork Driver wording on the job"
 
 
+def format_paste_for_daily_sheet(
+    day: str,
+    items: Sequence[CorkDriverItem],
+    carry: Sequence[str] = (),
+) -> str:
+    """Plain text for copy/paste into the Word daily sheet (no compare)."""
+    lines = [
+        f"{day.upper()} — Cork Driver extract",
+        "Copy the numbered lines below into your Word daily sheet.",
+        "=" * 60,
+        "",
+    ]
+    if not items:
+        lines.append("No Cork Driver items found for this day.")
+        lines.append("")
+    else:
+        for index, item in enumerate(items, 1):
+            lines.append(f"{index}. {item.cork_duty}")
+            hint = look_for_on_sheet(item)
+            if hint:
+                lines.append(f"   Sheet hint: {hint}")
+            if item.circular_page:
+                lines.append(f"   Circular page: {item.circular_page}")
+            lines.append("")
+
+    if carry:
+        lines.append("-" * 60)
+        lines.append("Carry forward (other day — do not paste on this sheet):")
+        for note in carry:
+            lines.append(f"  - {note}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def extract_for_daily_sheet(
+    pdf_path: Path,
+    day: Optional[str] = None,
+) -> Tuple[dict, dict, str]:
+    """
+    Upload-only extract: day pages PDF or full weekly circular.
+    day=None extracts every day found in a full circular.
+    Returns (items_by_day, carry_by_day, paste_text).
+    """
+    items_by_day: dict = {}
+    carry_by_day: dict = {}
+
+    day_texts = split_circular_by_day(pdf_path)
+    use_split = bool(day_texts) and (day is None or day in day_texts)
+
+    if use_split:
+        target_days = DAYS if day is None else (day,)
+        for d in target_days:
+            text = day_texts.get(d, "")
+            if not text.strip():
+                items_by_day[d] = []
+                carry_by_day[d] = []
+                continue
+            items, carry = parse_day_text(text, d, source_name=pdf_path.name)
+            items_by_day[d] = items
+            carry_by_day[d] = carry
+    else:
+        if day is None:
+            raise ValueError(
+                "Could not detect Monday–Sunday sections in this PDF. "
+                "Either upload the full weekly circular, or pick which day this file is."
+            )
+        text = extract_pdf_text(pdf_path)
+        if not text.strip():
+            raise ValueError(f"No text could be read from {pdf_path.name}")
+        items, carry = parse_day_text(text, day, source_name=pdf_path.name)
+        items_by_day[day] = items
+        carry_by_day[day] = carry
+
+    paste_parts: List[str] = []
+    for d in DAYS:
+        if d not in items_by_day:
+            continue
+        paste_parts.append(
+            format_paste_for_daily_sheet(d, items_by_day[d], carry_by_day.get(d, []))
+        )
+    if not paste_parts:
+        raise ValueError("No Cork Driver content found in that PDF.")
+    return items_by_day, carry_by_day, "\n\n".join(paste_parts)
+
+
 def format_checklist(
     day: str,
     week_dir: Path,

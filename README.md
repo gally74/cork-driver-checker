@@ -1,27 +1,38 @@
 # Cork Driver Checker
 
-Private GitHub Pro app. Checks Cork Driver amendments from the weekly circular
-against your daily sheets.
+Private GitHub Pro app for Cork Driver amendments from the weekly circular.
 
 Do not commit weekly circular PDFs or daily sheets. Upload them in the browser instead.
 
 ## Modes
 
-- **One day** — one day's pages PDF + that day's Word sheet (while you build Monday, etc.).
-- **Whole week** — full circular PDF (e.g. `4255.pdf`) + Mon-Sun weekly daily sheet
-  (e.g. `21 Sep to 27 Sep.docm`) → one week miss-list.
+- **Extract for daily sheet** (website default) — upload the circular PDF → copy/paste text into Word. No Word upload.
+- **One day** — one day's pages PDF + optional that day's Word sheet (compare / checklist). Unchanged.
+- **Whole week** — full circular PDF + Mon-Sun weekly daily sheet → miss-list. Unchanged.
 
-## On the work laptop (no .exe / .py / .bat)
+**Home PC Weekly Rosters → Scan Circulars** is a separate Excel tool and is not changed by this app.
+
+## Open website (recommended on work laptop)
+
+Host the Streamlit app so you only need a link + Upload:
+
+1. Push this repo to GitHub (already: `gally74/cork-driver-checker`).
+2. Go to [share.streamlit.io](https://share.streamlit.io) (Streamlit Community Cloud).
+3. Sign in with GitHub → **New app**.
+4. Repo: `gally74/cork-driver-checker` · Branch: `main` · Main file: `streamlit_app.py`.
+5. Deploy. Open the app URL → **Extract for daily sheet** → Upload → Copy into Word.
+
+Keep the app **private** if Streamlit/your plan allows (circulars are internal).
+
+## Codespaces (fallback)
 
 1. Open this repository on GitHub.
 2. Click **Code** → **Codespaces** → **Create codespace on main**.
-3. Wait until the terminal shows Streamlit is ready.
-4. Open the **Ports** tab → **8501** → globe / **Open in Browser**
-   (not the in-editor Simple Browser).
-5. If the port is Private, right-click **8501** → Port Visibility → **Public**.
-6. Choose **One day** or **Whole week**, upload the files, then compare.
-7. Download the compare `.txt` / `.csv`. **Missing** items still need to go on the sheet.
-8. Stop the codespace when finished so it does not keep using Pro hours.
+3. Wait until Streamlit is ready.
+4. **Ports** → **8501** → globe / **Open in Browser**.
+5. If the port is Private, set **Port Visibility** → **Public**.
+6. Use **Extract for daily sheet**, or the compare modes if you need them.
+7. Stop the codespace when finished.
 
 ### If you get HTTP 404
 
@@ -38,7 +49,7 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-Whole week from the command line:
+Whole week compare from the command line:
 
 ```text
 py -3 cork_driver_checker.py --full-circular 4255.pdf --weekly-sheet "21 Sep to 27 Sep.docm"

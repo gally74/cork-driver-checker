@@ -1,8 +1,9 @@
 """Browser checker for Cork Driver crew arrangements.
 
 Modes:
-  - One day: day PDF + that day's Word sheet
-  - Whole week: full circular PDF + Mon-Sun weekly Word sheet
+  - Extract for daily sheet: upload PDF → copy/paste text (website default)
+  - One day: day PDF + that day's Word sheet (home/compare — unchanged)
+  - Whole week: full circular PDF + Mon-Sun weekly Word sheet (unchanged)
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import streamlit as st
 from cork_driver_checker import (
     DAYS,
     compare_item_to_sheet,
+    extract_for_daily_sheet,
     format_checklist,
     format_compare_csv,
     format_compare_report,
@@ -28,17 +30,72 @@ st.set_page_config(page_title="Cork Driver Checker", layout="centered")
 
 st.title("Cork Driver Checker")
 st.caption(
-    "Compare needs both times (e.g. 0540 and 1047) plus the station (Portlaoise / Thurles)."
+    "Extract: upload circular → copy into Word. "
+    "Compare modes still need both times (e.g. 0540 and 1047) plus the station."
 )
 
 mode = st.radio(
     "Mode",
-    ["One day", "Whole week"],
+    ["Extract for daily sheet", "One day", "Whole week"],
     horizontal=True,
-    help="One day while you build a single sheet. Whole week for the full circular + Mon-Sun prep sheet.",
+    help=(
+        "Extract = upload PDF and copy text into Word. "
+        "One day / Whole week = existing compare tools (unchanged)."
+    ),
 )
 
-if mode == "One day":
+if mode == "Extract for daily sheet":
+    st.subheader("Upload → Extract → Copy into Word")
+    pdf_file = st.file_uploader(
+        "Upload circular PDF (full week e.g. 4255.pdf, or one day's pages)",
+        type=["pdf"],
+        key="extract_pdf",
+    )
+    day_choice = st.selectbox(
+        "Which day?",
+        ["All days (full circular)"] + list(DAYS),
+        index=0,
+        help="Use All days for a full weekly circular. Pick a day for Monday_pages.pdf etc.",
+    )
+    run_extract = st.button(
+        "Extract for daily sheet",
+        type="primary",
+        disabled=pdf_file is None,
+    )
+
+    if run_extract and pdf_file is not None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            pdf_path = tmp_dir / pdf_file.name
+            pdf_path.write_bytes(pdf_file.getvalue())
+            day = None if day_choice.startswith("All days") else day_choice
+            try:
+                items_by_day, carry_by_day, paste_text = extract_for_daily_sheet(
+                    pdf_path, day=day
+                )
+            except Exception as exc:
+                st.error(f"Could not extract that PDF. {exc}")
+                st.stop()
+
+        total = sum(len(v) for v in items_by_day.values())
+        st.success(f"Extracted {total} Cork Driver item(s). Select the text below and copy (Ctrl+A / Ctrl+C).")
+
+        for d in DAYS:
+            items = items_by_day.get(d, [])
+            if d not in items_by_day:
+                continue
+            st.write(f"**{d}:** {len(items)} item(s)")
+
+        st.download_button(
+            "Download extract (.txt)",
+            data=paste_text.encode("utf-8"),
+            file_name="Cork_Driver_daily_sheet_extract.txt",
+            mime="text/plain",
+            key="download_extract_txt",
+        )
+        st.text_area("Copy this into your Word daily sheet", paste_text, height=480)
+
+elif mode == "One day":
     day = st.selectbox("Which day?", DAYS, index=0)
     pdf_file = st.file_uploader(
         "Upload that day's circular pages (e.g. Monday_pages.pdf)",
@@ -248,8 +305,8 @@ st.divider()
 st.markdown(
     """
 **How to use**
-- **One day:** upload that day's pages PDF (and optional day Word sheet).
-- **Whole week:** upload the full circular (e.g. `4255.pdf`) and the Mon-Sun weekly daily sheet
-  (e.g. `21 Sep to 27 Sep.docm`). Download one week miss-list.
+- **Extract for daily sheet:** upload the circular PDF → copy the text into Word. No Word upload needed.
+- **One day / Whole week:** existing compare tools (home PC / Codespaces) — unchanged.
+- **Weekly Rosters → Scan Circulars** on the home PC is separate and untouched.
 """
 )
