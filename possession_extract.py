@@ -345,8 +345,9 @@ def format_possessions_simple(slots: Sequence[PossessionSlot]) -> str:
 
 
 def format_possessions_for_day(day: str, slots: Sequence[PossessionSlot]) -> str:
-    """Paste block for one Word daily-sheet day (append after circular notes)."""
+    """Paste block for one Word daily-sheet day (own row under circular notes)."""
     day_slots = [s for s in slots if s.day == day]
+    # One item per line - easy to skim in the daily sheet
     lines = ["* POSSESSIONS (Cork East / Cork-Mallow / Mallow-Tralee)"]
     if not day_slots:
         lines.append("* (none for this day - skim Sunday Absolute Possessions to confirm)")
@@ -355,18 +356,22 @@ def format_possessions_for_day(day: str, slots: Sequence[PossessionSlot]) -> str
     major = [s for s in day_slots if _is_major(s)]
     plant = [s for s in day_slots if not _is_major(s)]
     if major:
-        lines.append("* - Main / overnight -")
+        lines.append("* Main / overnight:")
         for s in major:
-            bit = f"* {s.line}: {s.time_from}-{s.time_to} ({s.duration}) - {s.direction} - {s.section}"
+            lines.append(
+                f"* {s.line}: {s.time_from}-{s.time_to} ({s.duration}) - {s.direction}"
+            )
+            detail = s.section
             if s.work:
-                bit += f" - {s.work}"
-            lines.append(bit)
+                detail += f" - {s.work}"
+            lines.append(f"*   {detail}")
     if plant:
-        lines.append("* - Daytime plant -")
+        lines.append("* Daytime plant:")
         for s in plant:
             lines.append(
-                f"* {s.line}: {s.time_from}-{s.time_to} ({s.duration}) - {s.section}"
+                f"* {s.line}: {s.time_from}-{s.time_to} ({s.duration})"
             )
+            lines.append(f"*   {s.section}")
     return "\n".join(lines)
 
 
