@@ -37,7 +37,8 @@ st.set_page_config(page_title="Cork / Mallow / Tralee Checker", layout="centered
 st.title("Cork / Mallow / Tralee Checker")
 st.caption(
     "Extract for daily sheet matches Cork Roster → Scan Circulars. "
-    "Extract possessions reads Absolute Possessions (usually Sunday pages). "
+    "Extract possessions always uses Sunday pages / full circular "
+    "(Absolute Possessions sit at the end). "
     "Compare modes still check Driver items against Word."
 )
 
@@ -114,24 +115,28 @@ if mode == "Extract for daily sheet":
 elif mode == "Extract possessions":
     st.subheader("Absolute Possessions → simple list")
     st.info(
-        "Reads the **Absolute Possessions** table (usually in **Sunday** pages, "
-        "or a full weekly circular / multi-part PDF). "
-        "Shows **Cork East**, **Cork–Mallow**, and **Mallow–Tralee** only — "
-        "day, times, duration, and section. "
-        "Separate from Scan Circulars — paste **after** your Driver notes."
+        "Absolute Possessions are **always at the end** of the weekly circular → "
+        "upload **Sunday_pages.pdf** or the **full weekly circular** (1–3 parts). "
+        "Do **not** upload Monday–Saturday day PDFs. "
+        "Pick a day (e.g. Monday) only to filter which slots to show — "
+        "the source PDF is still Sunday / full circular. "
+        "Cork East / Cork–Mallow / Mallow–Tralee only. Paste **after** Driver notes."
     )
     pdf_files = st.file_uploader(
-        "Upload Sunday pages and/or full circular PDF(s)",
+        "Upload Sunday pages and/or full weekly circular PDF(s)",
         type=["pdf"],
         accept_multiple_files=True,
         key="poss_pdfs",
+        help="Sunday_pages.pdf or full circular — not Monday_pages.pdf etc.",
     )
     day_choice = st.selectbox(
         "Show which day?",
         ["Whole week"] + list(DAYS),
         index=0,
         key="poss_day",
-        help="Whole week = readable summary. Pick a day for a paste block for that Word sheet.",
+        help=(
+            "Filters output only. Source PDF should still be Sunday pages / full circular."
+        ),
     )
     run_poss = st.button(
         "Extract possessions",
@@ -389,7 +394,7 @@ st.markdown(
     """
 **How to use**
 - **Extract for daily sheet:** same rules as Cork Roster **Scan Circulars** (Driver + engineering / buses / cancellations) → copy into Word.
-- **Extract possessions:** Absolute Possessions for Cork East / Cork–Mallow / Mallow–Tralee (usually Sunday pages). Paste **after** Driver notes.
+- **Extract possessions:** Absolute Possessions (always end of circular → **Sunday pages** or full PDF). Pick a day to filter; paste **after** Driver notes.
 - **One day / Whole week:** Driver compare tools (checklist against Word) — unchanged.
 - Excel: **Scan Circulars** then **Scan Possessions** (appends; does not replace notes).
 """
