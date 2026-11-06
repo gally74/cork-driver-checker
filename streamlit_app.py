@@ -2,6 +2,7 @@
 
 Modes:
   - Extract for daily sheet: upload PDF → copy/paste text (website default)
+  - Extract possessions: Absolute Possessions table → Cork East / Cork–Mallow / Mallow–Tralee
   - One day: day PDF + that day's Word sheet (home/compare — unchanged)
   - Whole week: full circular PDF + Mon-Sun weekly Word sheet (unchanged)
 """
@@ -24,24 +25,30 @@ from cork_driver_checker import (
     read_word_text,
     run_week_compare,
 )
+from possession_extract import (
+    extract_possessions_from_pdfs,
+    format_possessions_for_day,
+    format_possessions_simple,
+)
 
 
 st.set_page_config(page_title="Cork / Mallow / Tralee Checker", layout="centered")
 
 st.title("Cork / Mallow / Tralee Checker")
 st.caption(
-    "Extract for daily sheet matches Cork Roster → Scan Circulars "
-    "(Driver crew + engineering / buses / cancellations on Cork–Mallow–Tralee). "
+    "Extract for daily sheet matches Cork Roster → Scan Circulars. "
+    "Extract possessions reads Absolute Possessions (usually Sunday pages). "
     "Compare modes still check Driver items against Word."
 )
 
 mode = st.radio(
     "Mode",
-    ["Extract for daily sheet", "One day", "Whole week"],
+    ["Extract for daily sheet", "Extract possessions", "One day", "Whole week"],
     horizontal=True,
     help=(
-        "Extract = same notes as Excel Scan Circulars → copy into Word. "
-        "One day / Whole week = Driver compare tools (unchanged)."
+        "Extract = Scan Circulars notes. "
+        "Possessions = Absolute Possessions for Cork East / Cork–Mallow / Mallow–Tralee. "
+        "One day / Whole week = Driver compare (unchanged)."
     ),
 )
 
@@ -101,6 +108,73 @@ if mode == "Extract for daily sheet":
             file_name="circular_notes_daily_sheet.txt",
             mime="text/plain",
             key="download_extract_txt",
+        )
+        st.text_area("Copy this into your Word daily sheet", paste_text, height=480)
+
+elif mode == "Extract possessions":
+    st.subheader("Absolute Possessions → simple list")
+    st.info(
+        "Reads the **Absolute Possessions** table (usually in **Sunday** pages, "
+        "or a full weekly circular / multi-part PDF). "
+        "Shows **Cork East**, **Cork–Mallow**, and **Mallow–Tralee** only — "
+        "day, times, duration, and section. "
+        "Separate from Scan Circulars — paste **after** your Driver notes."
+    )
+    pdf_files = st.file_uploader(
+        "Upload Sunday pages and/or full circular PDF(s)",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key="poss_pdfs",
+    )
+    day_choice = st.selectbox(
+        "Show which day?",
+        ["Whole week"] + list(DAYS),
+        index=0,
+        key="poss_day",
+        help="Whole week = readable summary. Pick a day for a paste block for that Word sheet.",
+    )
+    run_poss = st.button(
+        "Extract possessions",
+        type="primary",
+        disabled=not pdf_files,
+        key="poss_run",
+    )
+
+    if run_poss and pdf_files:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            paths = []
+            for f in pdf_files:
+                p = tmp_dir / f.name
+                p.write_bytes(f.getvalue())
+                paths.append(p)
+            try:
+                slots = extract_possessions_from_pdfs(paths)
+            except Exception as exc:
+                st.error(f"Could not read possessions from that PDF. {exc}")
+                st.stop()
+
+        if day_choice == "Whole week":
+            paste_text = format_possessions_simple(slots)
+        else:
+            paste_text = format_possessions_for_day(day_choice, slots)
+
+        st.success(
+            f"Found {len(slots)} Cork-area possession slot(s). "
+            "Copy below into Word (after circular notes)."
+        )
+        # Quick counts by day
+        for d in DAYS:
+            n = sum(1 for s in slots if s.day == d)
+            if n:
+                st.write(f"**{d}:** {n}")
+
+        st.download_button(
+            "Download possessions (.txt)",
+            data=paste_text.encode("utf-8"),
+            file_name="possessions_cork_area.txt",
+            mime="text/plain",
+            key="download_poss_txt",
         )
         st.text_area("Copy this into your Word daily sheet", paste_text, height=480)
 
@@ -315,7 +389,8 @@ st.markdown(
     """
 **How to use**
 - **Extract for daily sheet:** same rules as Cork Roster **Scan Circulars** (Driver + engineering / buses / cancellations) → copy into Word.
+- **Extract possessions:** Absolute Possessions for Cork East / Cork–Mallow / Mallow–Tralee (usually Sunday pages). Paste **after** Driver notes.
 - **One day / Whole week:** Driver compare tools (checklist against Word) — unchanged.
-- Excel **Scan Circulars** still pastes into Word automatically at home; this site is the paste-ready fallback (e.g. work laptop).
+- Excel: **Scan Circulars** then **Scan Possessions** (appends; does not replace notes).
 """
 )
