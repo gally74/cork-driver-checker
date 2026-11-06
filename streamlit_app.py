@@ -26,11 +26,11 @@ from cork_driver_checker import (
 )
 
 
-st.set_page_config(page_title="Cork Driver Checker", layout="centered")
+st.set_page_config(page_title="Cork / Mallow / Tralee Checker", layout="centered")
 
-st.title("Cork Driver Checker")
+st.title("Cork / Mallow / Tralee Checker")
 st.caption(
-    "Extract: upload circular → copy into Word. "
+    "Extract Cork / Mallow / Tralee Driver lines → copy into Word. "
     "Compare modes still need both times (e.g. 0540 and 1047) plus the station."
 )
 
@@ -305,7 +305,7 @@ st.divider()
 st.markdown(
     """
 **How to use**
-- **Extract for daily sheet:** upload the circular PDF → copy the text into Word. No Word upload needed.
+- **Extract for daily sheet:** upload the circular PDF → Cork / Mallow / Tralee Driver lines → copy into Word.
 - **One day / Whole week:** existing compare tools (home PC / Codespaces) — unchanged.
 - **Weekly Rosters → Scan Circulars** on the home PC is separate and untouched.
 """

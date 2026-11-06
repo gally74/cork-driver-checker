@@ -71,6 +71,11 @@ OTHER_CREW = re.compile(
 )
 
 CORK_DRIVER_RE = re.compile(r"Cork Drivers?\b", re.IGNORECASE)
+# Cork + Mallow + Tralee depot drivers (daily-sheet extract)
+LOCAL_DRIVER_RE = re.compile(
+    r"(?:Cork|Mallow|Tralee)\s+Drivers?\b",
+    re.IGNORECASE,
+)
 
 TRAIN_LINE_RE = re.compile(
     r"(?P<kind>Ety\.?|Reg\.?,?|Spl\.?)\s+"
@@ -323,12 +328,14 @@ def extract_circular_page(preceding: str) -> str:
 
 
 def cork_driver_snippets(crew_text: str) -> List[str]:
+    """Extract Cork / Mallow / Tralee Driver duty snippets from a crew block."""
     snippets = []
-    for match in CORK_DRIVER_RE.finditer(crew_text):
+    for match in LOCAL_DRIVER_RE.finditer(crew_text):
         rest = crew_text[match.start():]
+        prefix_len = match.end() - match.start()
         cut_at = None
-        for crew_match in OTHER_CREW.finditer(rest[12:]):
-            abs_start = crew_match.start() + 12
+        for crew_match in OTHER_CREW.finditer(rest[prefix_len:]):
+            abs_start = crew_match.start() + prefix_len
             before = rest[max(0, abs_start - 24): abs_start]
             if re.search(r"conducts?\s*$", before, re.IGNORECASE):
                 continue
@@ -406,7 +413,7 @@ def parse_day_text(text: str, day: str, source_name: str = "") -> Tuple[List[Cor
         )
         crew_intro = body[: cut.start()] if cut else body[:900]
         crew_block = flatten(chunks[index] + " " + crew_intro)
-        if not CORK_DRIVER_RE.search(crew_block):
+        if not LOCAL_DRIVER_RE.search(crew_block):
             continue
 
         snippets = cork_driver_snippets(crew_block)
@@ -431,7 +438,7 @@ def parse_day_text(text: str, day: str, source_name: str = "") -> Tuple[List[Cor
         )
 
     covered = flatten(" ".join(item.cork_duty for item in items)).lower()
-    for match in CORK_DRIVER_RE.finditer(text):
+    for match in LOCAL_DRIVER_RE.finditer(text):
         window = flatten(text[max(0, match.start() - 400): match.end() + 280])
         if "crew arrangements" not in window.lower():
             continue
@@ -466,7 +473,14 @@ def merge_items(items: Sequence[CorkDriverItem]) -> Tuple[List[CorkDriverItem], 
         all_carry.extend(item.carry_forward)
         times = tuple(sorted(unique(time_to_hhmm(t) for t in re.findall(r"\d{1,2}\.\d{2}", item.cork_duty))))
         action = "conduct" if "conduct" in item.cork_duty.lower() else "work"
-        key = (action, times) if times else item.fingerprint()
+        duty_l = item.cork_duty.lower()
+        if "mallow driver" in duty_l:
+            depot = "mallow"
+        elif "tralee driver" in duty_l:
+            depot = "tralee"
+        else:
+            depot = "cork"
+        key = (depot, action, times) if times else (depot,) + item.fingerprint()
         if key in seen:
             existing = merged[seen[key]]
             for train in item.related_trains:
@@ -823,7 +837,7 @@ def look_for_on_sheet(item: CorkDriverItem) -> str:
         bits.append(useful_places[0])
     elif places:
         bits.append(places[0])
-    return ", ".join(bits) if bits else "Cork Driver wording on the job"
+    return ", ".join(bits) if bits else "Cork / Mallow / Tralee wording on the job"
 
 
 def format_paste_for_daily_sheet(
@@ -833,13 +847,13 @@ def format_paste_for_daily_sheet(
 ) -> str:
     """Plain text for copy/paste into the Word daily sheet (no compare)."""
     lines = [
-        f"{day.upper()} — Cork Driver extract",
-        "Copy the numbered lines below into your Word daily sheet.",
+        f"{day.upper()} — Cork / Mallow / Tralee extract",
+        "Copy Cork / Mallow / Tralee lines below into your Word daily sheet.",
         "=" * 60,
         "",
     ]
     if not items:
-        lines.append("No Cork Driver items found for this day.")
+        lines.append("No Cork / Mallow / Tralee Driver items found for this day.")
         lines.append("")
     else:
         for index, item in enumerate(items, 1):
@@ -908,7 +922,7 @@ def extract_for_daily_sheet(
             format_paste_for_daily_sheet(d, items_by_day[d], carry_by_day.get(d, []))
         )
     if not paste_parts:
-        raise ValueError("No Cork Driver content found in that PDF.")
+        raise ValueError("No Cork / Mallow / Tralee Driver content found in that PDF.")
     return items_by_day, carry_by_day, "\n\n".join(paste_parts)
 
 
