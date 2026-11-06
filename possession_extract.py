@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Extract Cork-area Absolute Possessions — clear & simple.
+"""Extract Cork-area Absolute Possessions - clear & simple.
 
 Focus lines:
-  - Cork East (Cork–Cobh / Midleton)
-  - Cork–Mallow (incl. Charleville)
-  - Mallow–Tralee
+  - Cork East (Cork-Cobh / Midleton)
+  - Cork-Mallow (incl. Charleville)
+  - Mallow-Tralee
 
 PDF layout tip: each section lists From-times, then To-times, then day codes.
-Pair row i as From[i]–To[i].
+Pair row i as From[i]-To[i].
 
 Usage:
   python possession_extract.py --pdf Sunday_pages.pdf --out notes.txt
@@ -35,8 +35,8 @@ DAY_NAMES = (
 
 CORRIDOR_RULES = (
     (re.compile(r"(?i)CK/?CH/?MT|Cork[- /]*Cobh|Cork[- /]*Midleton|Cobh[- /]*Midleton"), "Cork East"),
-    (re.compile(r"(?i)MW/?CK|Mallow[- /]*Cork|Cork[- /]*Mallow"), "Cork–Mallow"),
-    (re.compile(r"(?i)RC/?CK|Charleville[- /]*Cork"), "Cork–Mallow (Charleville)"),
+    (re.compile(r"(?i)MW/?CK|Mallow[- /]*Cork|Cork[- /]*Mallow"), "Cork-Mallow"),
+    (re.compile(r"(?i)RC/?CK|Charleville[- /]*Cork"), "Cork-Mallow (Charleville)"),
     (
         re.compile(
             r"(?i)MW/?BR|BR/?KY|BR/?MT|MT/?RE|KY/?FE|KY/?STN|FE/?TE|"
@@ -44,7 +44,7 @@ CORRIDOR_RULES = (
             r"Millstreet[- /]*Rathmore|Killarney[- /]*Farranfore|Farranfore[- /]*Tralee|"
             r"Killarney Station|MALLOW[- /]*TRALEE"
         ),
-        "Mallow–Tralee",
+        "Mallow-Tralee",
     ),
 )
 
@@ -222,7 +222,7 @@ def extract_possessions(text: str) -> List[PossessionSlot]:
         body = re.sub(r"(?i)W\.?E\.?\s*\d{1,2}\.\d{2}\.\d{2}", " ", body)
         body = re.sub(r"(?i)DAYS OF THE WEEK:.*", " ", body)
         body = re.sub(r"(?i)MONDAY \d+(?:ST|ND|RD|TH)? TO SUNDAY .*?20\d{2}", " ", body)
-        # Drop long narrative "At 23.20 hrs on Monday..." — keep table block only
+        # Drop long narrative "At 23.20 hrs on Monday..." - keep table block only
         body = re.sub(r"(?i)At \d{1,2}\.\d{2} hrs on .*?(?=\(|$)", " ", body)
 
         direction = "Up & Down"
@@ -245,7 +245,7 @@ def extract_possessions(text: str) -> List[PossessionSlot]:
 
         for idx, days in enumerate(day_rows):
             tf, tt = pairs[idx] if idx < len(pairs) else pairs[0]
-            # Skip zero-length daytime noise (00:05–00:05)
+            # Skip zero-length daytime noise (00:05-00:05)
             if tf == tt and tf not in ("00:00", "24:00"):
                 continue
             for d in days:
@@ -270,9 +270,9 @@ def extract_possessions(text: str) -> List[PossessionSlot]:
     order = {n: i for i, n in enumerate(DAY_NAMES)}
     line_order = {
         "Cork East": 0,
-        "Cork–Mallow": 1,
-        "Cork–Mallow (Charleville)": 2,
-        "Mallow–Tralee": 3,
+        "Cork-Mallow": 1,
+        "Cork-Mallow (Charleville)": 2,
+        "Mallow-Tralee": 3,
     }
     slots.sort(
         key=lambda s: (
@@ -286,7 +286,7 @@ def extract_possessions(text: str) -> List[PossessionSlot]:
 
 
 def _is_major(s: PossessionSlot) -> bool:
-    """Overnight / Up & Down / long blocks — show first."""
+    """Overnight / Up & Down / long blocks - show first."""
     if "Up & Down" in s.direction:
         return True
     try:
@@ -304,8 +304,8 @@ def _is_major(s: PossessionSlot) -> bool:
 
 def format_possessions_simple(slots: Sequence[PossessionSlot]) -> str:
     lines = [
-        "POSSESSIONS — Cork East / Cork–Mallow / Mallow–Tralee",
-        "(from Absolute Possessions table — skim circular to confirm)",
+        "POSSESSIONS - Cork East / Cork-Mallow / Mallow-Tralee",
+        "(from Absolute Possessions table - skim circular to confirm)",
         "",
     ]
     if not slots:
@@ -327,18 +327,18 @@ def format_possessions_simple(slots: Sequence[PossessionSlot]) -> str:
                 lines.append("Main / overnight")
                 for x in major:
                     lines.append(
-                        f"  {x.line}: {x.time_from}–{x.time_to} ({x.duration}) — {x.direction}"
+                        f"  {x.line}: {x.time_from}-{x.time_to} ({x.duration}) - {x.direction}"
                     )
                     detail = x.section
                     if x.work:
-                        detail += f" — {x.work}"
+                        detail += f" - {x.work}"
                     lines.append(f"    {detail}")
             if plant:
                 lines.append("")
                 lines.append("Daytime plant (single line)")
                 for x in plant:
                     lines.append(
-                        f"  {x.line}: {x.time_from}–{x.time_to} ({x.duration}) — {x.section}"
+                        f"  {x.line}: {x.time_from}-{x.time_to} ({x.duration}) - {x.section}"
                     )
     lines.append("")
     return "\n".join(lines)
@@ -347,25 +347,25 @@ def format_possessions_simple(slots: Sequence[PossessionSlot]) -> str:
 def format_possessions_for_day(day: str, slots: Sequence[PossessionSlot]) -> str:
     """Paste block for one Word daily-sheet day (append after circular notes)."""
     day_slots = [s for s in slots if s.day == day]
-    lines = ["* POSSESSIONS (Cork East / Cork–Mallow / Mallow–Tralee)"]
+    lines = ["* POSSESSIONS (Cork East / Cork-Mallow / Mallow-Tralee)"]
     if not day_slots:
-        lines.append("* (none for this day — skim Sunday Absolute Possessions to confirm)")
+        lines.append("* (none for this day - skim Sunday Absolute Possessions to confirm)")
         return "\n".join(lines)
 
     major = [s for s in day_slots if _is_major(s)]
     plant = [s for s in day_slots if not _is_major(s)]
     if major:
-        lines.append("* — Main / overnight —")
+        lines.append("* - Main / overnight -")
         for s in major:
-            bit = f"* {s.line}: {s.time_from}–{s.time_to} ({s.duration}) — {s.direction} — {s.section}"
+            bit = f"* {s.line}: {s.time_from}-{s.time_to} ({s.duration}) - {s.direction} - {s.section}"
             if s.work:
-                bit += f" — {s.work}"
+                bit += f" - {s.work}"
             lines.append(bit)
     if plant:
-        lines.append("* — Daytime plant —")
+        lines.append("* - Daytime plant -")
         for s in plant:
             lines.append(
-                f"* {s.line}: {s.time_from}–{s.time_to} ({s.duration}) — {s.section}"
+                f"* {s.line}: {s.time_from}-{s.time_to} ({s.duration}) - {s.section}"
             )
     return "\n".join(lines)
 
