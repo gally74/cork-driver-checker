@@ -845,7 +845,7 @@ def format_paste_for_daily_sheet(
     items: Sequence[CorkDriverItem],
     carry: Sequence[str] = (),
 ) -> str:
-    """Plain text for copy/paste into the Word daily sheet (no compare)."""
+    """Legacy Driver-item paste (compare mode helpers). Prefer format_roster_notes_paste."""
     lines = [
         f"{day.upper()} — Cork / Mallow / Tralee extract",
         "Copy Cork / Mallow / Tralee lines below into your Word daily sheet.",
@@ -875,17 +875,51 @@ def format_paste_for_daily_sheet(
     return "\n".join(lines)
 
 
+def format_roster_notes_paste(day: str, notes: Sequence[str], day_date=None) -> str:
+    """Same paste shape as Cork Roster Scan Circulars (circular_extract.py)."""
+    from circular_extract import CHECK_PDF_BANNER
+
+    if day_date is not None:
+        date_bit = day_date.strftime("%d %B %Y")
+    else:
+        date_bit = day
+    lines = [
+        f"CIRCULAR NOTES - {day} {date_bit} "
+        f"(Cork / Mallow / Tralee roster - skim PDF to confirm)",
+        "",
+    ]
+    if not notes:
+        lines.append(f"* {CHECK_PDF_BANNER}")
+    else:
+        for n in notes:
+            lines.append(f"* {n}")
+        lines.append("")
+        lines.append(
+            "* Reminder: skim Engineering / Traffic / Empty Railcar for anything missed."
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
 def extract_for_daily_sheet(
     pdf_path: Path,
     day: Optional[str] = None,
 ) -> Tuple[dict, dict, str]:
     """
-    Upload-only extract: day pages PDF or full weekly circular.
+    Upload-only extract matching Cork Roster → Scan Circulars.
+
+    Uses the same rules as Weekly Rosters scripts/circular_extract.py:
+    Cork/Mallow/Tralee Driver crew, engineering/traffic for those depots,
+    bus substitutions, cancellations, and other CMT route impacts.
+
     day=None extracts every day found in a full circular.
-    Returns (items_by_day, carry_by_day, paste_text).
+    Returns (notes_by_day, dates_by_day, paste_text).
+    notes_by_day values are list[str] (roster notes), not CorkDriverItem.
     """
-    items_by_day: dict = {}
-    carry_by_day: dict = {}
+    from circular_extract import extract_pdf_day_date, extract_roster_notes
+
+    notes_by_day: dict = {}
+    dates_by_day: dict = {}
 
     day_texts = split_circular_by_day(pdf_path)
     use_split = bool(day_texts) and (day is None or day in day_texts)
@@ -895,12 +929,11 @@ def extract_for_daily_sheet(
         for d in target_days:
             text = day_texts.get(d, "")
             if not text.strip():
-                items_by_day[d] = []
-                carry_by_day[d] = []
+                notes_by_day[d] = []
+                dates_by_day[d] = None
                 continue
-            items, carry = parse_day_text(text, d, source_name=pdf_path.name)
-            items_by_day[d] = items
-            carry_by_day[d] = carry
+            notes_by_day[d] = extract_roster_notes(text)
+            dates_by_day[d] = extract_pdf_day_date(text, d)
     else:
         if day is None:
             raise ValueError(
@@ -910,20 +943,27 @@ def extract_for_daily_sheet(
         text = extract_pdf_text(pdf_path)
         if not text.strip():
             raise ValueError(f"No text could be read from {pdf_path.name}")
-        items, carry = parse_day_text(text, day, source_name=pdf_path.name)
-        items_by_day[day] = items
-        carry_by_day[day] = carry
+        notes_by_day[day] = extract_roster_notes(text)
+        dates_by_day[day] = extract_pdf_day_date(text, day)
 
     paste_parts: List[str] = []
+    any_notes = False
     for d in DAYS:
-        if d not in items_by_day:
+        if d not in notes_by_day:
             continue
+        notes = notes_by_day[d]
+        if notes:
+            any_notes = True
         paste_parts.append(
-            format_paste_for_daily_sheet(d, items_by_day[d], carry_by_day.get(d, []))
+            format_roster_notes_paste(d, notes, dates_by_day.get(d))
         )
     if not paste_parts:
-        raise ValueError("No Cork / Mallow / Tralee Driver content found in that PDF.")
-    return items_by_day, carry_by_day, "\n\n".join(paste_parts)
+        raise ValueError("No circular text found for Cork / Mallow / Tralee in that PDF.")
+    # Still return paste even if empty notes (CHECK PDF banner) — same as Excel Scan
+    if not any_notes and day is not None:
+        # single day with no matches is OK — banner already in paste
+        pass
+    return notes_by_day, dates_by_day, "\n".join(paste_parts)
 
 
 def format_checklist(

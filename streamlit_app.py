@@ -30,8 +30,9 @@ st.set_page_config(page_title="Cork / Mallow / Tralee Checker", layout="centered
 
 st.title("Cork / Mallow / Tralee Checker")
 st.caption(
-    "Extract Cork / Mallow / Tralee Driver lines → copy into Word. "
-    "Compare modes still need both times (e.g. 0540 and 1047) plus the station."
+    "Extract for daily sheet matches Cork Roster → Scan Circulars "
+    "(Driver crew + engineering / buses / cancellations on Cork–Mallow–Tralee). "
+    "Compare modes still check Driver items against Word."
 )
 
 mode = st.radio(
@@ -39,13 +40,18 @@ mode = st.radio(
     ["Extract for daily sheet", "One day", "Whole week"],
     horizontal=True,
     help=(
-        "Extract = upload PDF and copy text into Word. "
-        "One day / Whole week = existing compare tools (unchanged)."
+        "Extract = same notes as Excel Scan Circulars → copy into Word. "
+        "One day / Whole week = Driver compare tools (unchanged)."
     ),
 )
 
 if mode == "Extract for daily sheet":
     st.subheader("Upload → Extract → Copy into Word")
+    st.info(
+        "Same extract as **Weekly Rosters → Scan Circulars**: Cork / Mallow / Tralee "
+        "Driver notes, engineering works, bus substitutions, cancellations, and other "
+        "CMT route impacts. Paste under the red day heading (or notes band) in Word."
+    )
     pdf_file = st.file_uploader(
         "Upload circular PDF (full week e.g. 4255.pdf, or one day's pages)",
         type=["pdf"],
@@ -70,26 +76,29 @@ if mode == "Extract for daily sheet":
             pdf_path.write_bytes(pdf_file.getvalue())
             day = None if day_choice.startswith("All days") else day_choice
             try:
-                items_by_day, carry_by_day, paste_text = extract_for_daily_sheet(
+                notes_by_day, dates_by_day, paste_text = extract_for_daily_sheet(
                     pdf_path, day=day
                 )
             except Exception as exc:
                 st.error(f"Could not extract that PDF. {exc}")
                 st.stop()
 
-        total = sum(len(v) for v in items_by_day.values())
-        st.success(f"Extracted {total} Cork Driver item(s). Select the text below and copy (Ctrl+A / Ctrl+C).")
+        total = sum(len(v) for v in notes_by_day.values())
+        st.success(
+            f"Extracted {total} roster note(s) (Scan Circulars style). "
+            "Select the text below and copy (Ctrl+A / Ctrl+C)."
+        )
 
         for d in DAYS:
-            items = items_by_day.get(d, [])
-            if d not in items_by_day:
+            notes = notes_by_day.get(d)
+            if notes is None:
                 continue
-            st.write(f"**{d}:** {len(items)} item(s)")
+            st.write(f"**{d}:** {len(notes)} note(s)")
 
         st.download_button(
             "Download extract (.txt)",
             data=paste_text.encode("utf-8"),
-            file_name="Cork_Driver_daily_sheet_extract.txt",
+            file_name="circular_notes_daily_sheet.txt",
             mime="text/plain",
             key="download_extract_txt",
         )
@@ -305,8 +314,8 @@ st.divider()
 st.markdown(
     """
 **How to use**
-- **Extract for daily sheet:** upload the circular PDF → Cork / Mallow / Tralee Driver lines → copy into Word.
-- **One day / Whole week:** existing compare tools (home PC / Codespaces) — unchanged.
-- **Weekly Rosters → Scan Circulars** on the home PC is separate and untouched.
+- **Extract for daily sheet:** same rules as Cork Roster **Scan Circulars** (Driver + engineering / buses / cancellations) → copy into Word.
+- **One day / Whole week:** Driver compare tools (checklist against Word) — unchanged.
+- Excel **Scan Circulars** still pastes into Word automatically at home; this site is the paste-ready fallback (e.g. work laptop).
 """
 )
