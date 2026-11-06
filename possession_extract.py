@@ -9,8 +9,7 @@ Focus lines: Cork East / Cork-Mallow / Mallow-Tralee.
 
 Usage:
   python possession_extract.py --pdf Sunday_pages.pdf --out notes.txt
-  python possession_extract.py --pdf part1.pdf --pdf part2.pdf --out notes.txt
-  python possession_extract.py --pdf Sunday_pages.pdf --day Monday --out day.txt
+  python possession_extract.py --pdf Sunday_pages.pdf --day Friday --out day.txt
 """
 from __future__ import annotations
 
@@ -19,7 +18,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 DAY_NAMES = (
     "Monday",
@@ -53,11 +52,21 @@ DAY7_RE = re.compile(
 TIME_RE = re.compile(r"(?<!\d)(\d{1,2}\.\d{2})(?!\.\d)")
 DIR_RE = re.compile(r"(?i)\b(Up & Down|Up Only|Down Only|Down Fast|Up Fast|Single)\b")
 HEADER_RE = re.compile(r"(?i)ABSOLUTE POSSESSIONS|ENGINEERING WORKS REQUIRING ABSOLUTE")
+MILE_TOKEN_RE = re.compile(r"\b(\d{1,3}(?:,\d{3,4})?)\b")
 WORK_KEYWORDS = re.compile(
     r"(?i)\b(CACR Works|Track Maintenance|Track Repairs|Hired Plant|Drainage|"
     r"Rural Fencing|OTMs?|Tamper|Hobs Train|Rail Milling|L\.?C\.? Upgrade|"
     r"Vegetation|Bridge|Signalling|Fencing)\b"
 )
+
+DIR_LABEL = {
+    "Single": "Single line",
+    "Up & Down": "Up & Down (both)",
+    "Up Only": "Up only",
+    "Down Only": "Down only",
+    "Up Fast": "Up Fast",
+    "Down Fast": "Down Fast",
+}
 
 
 @dataclass(frozen=True)
@@ -70,6 +79,7 @@ class PossessionSlot:
     time_to: str
     duration: str
     work: str
+    miles: str  # e.g. "19 to 25" or "39.0880 to 50.0880"
 
 
 def read_pdf_text(path: Path) -> str:
@@ -134,10 +144,8 @@ def _parse_days(token: str) -> List[int]:
 
 
 def _clean_work(body: str) -> str:
-    """Prefer short work keywords; drop signals / legends / miles."""
     found = WORK_KEYWORDS.findall(body)
     if found:
-        # preserve order, unique
         seen = set()
         uniq = []
         for w in found:
@@ -147,6 +155,53 @@ def _clean_work(body: str) -> str:
                 uniq.append(w)
         return ", ".join(uniq[:6])
     return ""
+
+
+def _fmt_mile(tok: str) -> str:
+    """39,0880 -> 39.0880; plain 19 stays 19."""
+    if "," in tok:
+        return tok.replace(",", ".", 1)
+    return tok
+
+
+def _parse_miles(body: str) -> str:
+    """Miles From/To at end of Absolute Possessions row (not page numbers / day codes)."""
+    cleaned = body
+    cleaned = re.sub(r"(?i)W\.?C\.?\s*\d+", " ", cleaned)
+    cleaned = re.sub(r"-\s*\d{2,3}\s*-", " ", cleaned)  # page "- 110 -"
+    cleaned = re.sub(r"(?i)Traffic Arrangements:.*", " ", cleaned)
+    cleaned = DAY7_RE.sub(" ", cleaned)
+    cleaned = TIME_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"(?i)\b(?:No|Yes)\b", " ", cleaned)
+
+    # Prefer proper chainage pairs: 39,0880 50,0880
+    dec_pairs = re.findall(r"(\d{1,3},\d{3,4})\s+(\d{1,3},\d{3,4})", cleaned)
+    if dec_pairs:
+        a, b = dec_pairs[-1]
+        return f"{_fmt_mile(a)} to {_fmt_mile(b)}"
+
+    # Mixed integer + chainage: 0 10,1320
+    mixed = re.findall(r"(\d{1,3})\s+(\d{1,3},\d{3,4})", cleaned)
+    if mixed:
+        a, b = mixed[-1]
+        return f"{a} to {_fmt_mile(b)}"
+    mixed2 = re.findall(r"(\d{1,3},\d{3,4})\s+(\d{1,3})\b", cleaned)
+    if mixed2:
+        a, b = mixed2[-1]
+        return f"{_fmt_mile(a)} to {b}"
+
+    # Plain integer miles: 19 25 (avoid day leftovers 1-7 / page nums)
+    int_pairs = re.findall(r"(?<![\d,])(\d{1,3})\s+(\d{1,3})(?![\d,])", cleaned)
+    for a, b in reversed(int_pairs):
+        ai, bi = int(a), int(b)
+        if ai > 7 or bi > 7:  # not a leftover day-code fragment
+            if 0 <= ai <= 250 and 0 <= bi <= 250:
+                return f"{a} to {b}"
+    return ""
+
+
+def _dir_label(direction: str) -> str:
+    return DIR_LABEL.get(direction, direction)
 
 
 def _section_name_after(text: str, start: int) -> str:
@@ -175,20 +230,16 @@ def _section_name_after(text: str, start: int) -> str:
 
 
 def _pair_times(times: List[str], n_rows: int) -> List[Tuple[str, str]]:
-    """Match Absolute Possessions table: From×N then To×N (or sequential pairs)."""
     if n_rows <= 0 or not times:
         return []
-    # Ideal: exactly 2N times → first N From, last N To
     if len(times) == 2 * n_rows:
         return [(_norm_time(times[i]), _norm_time(times[i + n_rows])) for i in range(n_rows)]
-    # Extra times (noise) but at least 2N: take first 2N with From/To split
     if len(times) > 2 * n_rows and len(times) % 2 == 0:
         half = len(times) // 2
         if half >= n_rows:
             return [
                 (_norm_time(times[i]), _norm_time(times[i + half])) for i in range(n_rows)
             ]
-    # Fallback sequential pairs
     pairs: List[Tuple[str, str]] = []
     j = 0
     while j + 1 < len(times) and len(pairs) < n_rows:
@@ -220,8 +271,13 @@ def extract_possessions(text: str) -> List[PossessionSlot]:
         body = re.sub(r"(?i)W\.?E\.?\s*\d{1,2}\.\d{2}\.\d{2}", " ", body)
         body = re.sub(r"(?i)DAYS OF THE WEEK:.*", " ", body)
         body = re.sub(r"(?i)MONDAY \d+(?:ST|ND|RD|TH)? TO SUNDAY .*?20\d{2}", " ", body)
-        # Drop long narrative "At 23.20 hrs on Monday..." - keep table block only
         body = re.sub(r"(?i)At \d{1,2}\.\d{2} hrs on .*?(?=\(|$)", " ", body)
+        # OCR glitch in day codes: 1,2,3,45,_,_ → 1,2,3,4,5,_,_
+        body = re.sub(
+            r"\b([1-7_]\s*,\s*[1-7_]\s*,\s*[1-7_]\s*,\s*)([1-7])([1-7])(\s*,\s*[1-7_]\s*,\s*[1-7_])\b",
+            r"\1\2,\3\4",
+            body,
+        )
 
         direction = "Up & Down"
         dm = DIR_RE.search(body)
@@ -239,11 +295,11 @@ def extract_possessions(text: str) -> List[PossessionSlot]:
             continue
 
         work = _clean_work(body)
+        miles = _parse_miles(body)
         section_label = f"{name} ({code})"
 
         for idx, days in enumerate(day_rows):
             tf, tt = pairs[idx] if idx < len(pairs) else pairs[0]
-            # Skip zero-length daytime noise (00:05-00:05)
             if tf == tt and tf not in ("00:00", "24:00"):
                 continue
             for d in days:
@@ -262,6 +318,7 @@ def extract_possessions(text: str) -> List[PossessionSlot]:
                         time_to=tt,
                         duration=_duration_hm(tf, tt),
                         work=work,
+                        miles=miles,
                     )
                 )
 
@@ -276,28 +333,50 @@ def extract_possessions(text: str) -> List[PossessionSlot]:
         key=lambda s: (
             order.get(s.day, 99),
             line_order.get(s.line, 9),
-            s.time_from,
             s.section,
+            s.time_from,
         )
     )
     return slots
 
 
-def _is_major(s: PossessionSlot) -> bool:
-    """Overnight / Up & Down / long blocks - show first."""
-    if "Up & Down" in s.direction:
-        return True
-    try:
-        h = int(s.time_from.split(":")[0])
-        if h >= 20 or h < 6:
-            return True
-    except Exception:
-        pass
-    # duration >= 3h
-    m = re.match(r"(\d+)h", s.duration)
-    if m and int(m.group(1)) >= 3:
-        return True
-    return False
+def _format_day_blocks(day_slots: Sequence[PossessionSlot], bullet: bool) -> List[str]:
+    """Group by section - like the circular table, clear for one day."""
+    lines: List[str] = []
+    p = "* " if bullet else ""
+    ind = "*   " if bullet else "  "
+
+    # Preserve sort: line then section then time
+    by_section: Dict[Tuple[str, str, str, str], List[PossessionSlot]] = {}
+    order_keys: List[Tuple[str, str, str, str]] = []
+    for s in day_slots:
+        key = (s.line, s.section, s.direction, s.miles)
+        if key not in by_section:
+            by_section[key] = []
+            order_keys.append(key)
+        by_section[key].append(s)
+
+    for key in order_keys:
+        line, section, direction, miles = key
+        group = by_section[key]
+        work = next((g.work for g in group if g.work), "")
+        lines.append(f"{p}{section}")
+        lines.append(f"{ind}Route: {line}")
+        lines.append(f"{ind}Line: {_dir_label(direction)}")
+        if miles:
+            lines.append(f"{ind}Miles: {miles}")
+        if work:
+            lines.append(f"{ind}Work: {work}")
+        lines.append(f"{ind}Times:")
+        for g in group:
+            lines.append(
+                f"{ind}  {g.time_from}-{g.time_to} ({g.duration})"
+            )
+        lines.append(f"{p}".rstrip() if bullet else "")
+    # drop trailing blank
+    while lines and lines[-1] == "":
+        lines.pop()
+    return lines
 
 
 def format_possessions_simple(slots: Sequence[PossessionSlot]) -> str:
@@ -313,64 +392,30 @@ def format_possessions_simple(slots: Sequence[PossessionSlot]) -> str:
     for day in DAY_NAMES:
         day_slots = [x for x in slots if x.day == day]
         lines.append("")
-        lines.append(day)
-        lines.append("=" * len(day))
+        lines.append(f"{day} only")
+        lines.append("=" * len(f"{day} only"))
         if not day_slots:
             lines.append("No Cork-area possessions for this day.")
             continue
-        major = [x for x in day_slots if _is_major(x)]
-        plant = [x for x in day_slots if not _is_major(x)]
-        if major:
-            lines.append("")
-            lines.append("Main / overnight")
-            for x in major:
-                lines.append(
-                    f"  {x.line}: {x.time_from}-{x.time_to} ({x.duration}) - {x.direction}"
-                )
-                detail = x.section
-                if x.work:
-                    detail += f" - {x.work}"
-                lines.append(f"    {detail}")
-        if plant:
-            lines.append("")
-            lines.append("Daytime plant (single line)")
-            for x in plant:
-                lines.append(
-                    f"  {x.line}: {x.time_from}-{x.time_to} ({x.duration}) - {x.section}"
-                )
+        lines.extend(_format_day_blocks(day_slots, bullet=False))
     lines.append("")
     return "\n".join(lines)
 
 
 def format_possessions_for_day(day: str, slots: Sequence[PossessionSlot]) -> str:
-    """Paste block for one Word daily-sheet day (own row under circular notes)."""
+    """Paste block for one Word day - that day only, clear table-style."""
     day_slots = [s for s in slots if s.day == day]
-    # One item per line - easy to skim in the daily sheet
-    lines = ["* POSSESSIONS (Cork East / Cork-Mallow / Mallow-Tralee)"]
+    lines = [
+        f"* POSSESSIONS - {day} only",
+        "* Cork East / Cork-Mallow / Mallow-Tralee",
+        "* (from Sunday Absolute Possessions - skim circular to confirm)",
+    ]
     if not day_slots:
         lines.append(f"* No Cork-area possessions for {day}.")
-        lines.append("* (Skim Sunday Absolute Possessions in the circular to confirm.)")
         return "\n".join(lines)
 
-    major = [s for s in day_slots if _is_major(s)]
-    plant = [s for s in day_slots if not _is_major(s)]
-    if major:
-        lines.append("* Main / overnight:")
-        for s in major:
-            lines.append(
-                f"* {s.line}: {s.time_from}-{s.time_to} ({s.duration}) - {s.direction}"
-            )
-            detail = s.section
-            if s.work:
-                detail += f" - {s.work}"
-            lines.append(f"*   {detail}")
-    if plant:
-        lines.append("* Daytime plant:")
-        for s in plant:
-            lines.append(
-                f"* {s.line}: {s.time_from}-{s.time_to} ({s.duration})"
-            )
-            lines.append(f"*   {s.section}")
+    lines.append("*")
+    lines.extend(_format_day_blocks(day_slots, bullet=True))
     return "\n".join(lines)
 
 
@@ -382,7 +427,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Extract Cork-area Absolute Possessions")
     ap.add_argument("--pdf", action="append", required=True, help="PDF path (repeatable)")
     ap.add_argument("--out", required=True, help="Output text file")
-    ap.add_argument("--day", help="Monday..Sunday → one-day paste block")
+    ap.add_argument("--day", help="Monday..Sunday - one-day paste block only")
     args = ap.parse_args(list(argv) if argv is not None else None)
 
     paths = [Path(p) for p in args.pdf]
