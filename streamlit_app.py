@@ -25,12 +25,24 @@ from cork_driver_checker import (
     read_word_text,
     run_week_compare,
 )
-from possession_extract import (
-    extract_possessions_from_pdfs,
-    format_possessions_for_day,
-    format_possessions_simple,
-    prepare_slots,
-)
+
+# Possession extract is optional at import time so Driver modes still load
+# if Streamlit Cloud is mid-redeploy. Loaded when that mode runs.
+try:
+    from possession_extract import (
+        extract_possessions_from_pdfs,
+        format_possessions_for_day,
+        format_possessions_simple,
+        prepare_slots,
+    )
+
+    _POSSESSION_IMPORT_ERROR = None
+except Exception as _poss_exc:  # pragma: no cover - cloud deploy edge
+    extract_possessions_from_pdfs = None  # type: ignore
+    format_possessions_for_day = None  # type: ignore
+    format_possessions_simple = None  # type: ignore
+    prepare_slots = None  # type: ignore
+    _POSSESSION_IMPORT_ERROR = _poss_exc
 
 
 st.set_page_config(page_title="Cork / Mallow / Tralee Checker", layout="centered")
@@ -115,6 +127,13 @@ if mode == "Extract for daily sheet":
 
 elif mode == "Extract possessions":
     st.subheader("Absolute Possessions → simple list")
+    if _POSSESSION_IMPORT_ERROR is not None:
+        st.error(
+            "Could not load possession_extract.py on the server. "
+            "Reboot the Streamlit app (Manage app → Reboot), or wait for redeploy. "
+            f"Detail: {_POSSESSION_IMPORT_ERROR}"
+        )
+        st.stop()
     st.info(
         "Absolute Possessions are **always at the end** of the weekly circular → "
         "upload **Sunday_pages.pdf** or the **full weekly circular** (1–3 parts). "

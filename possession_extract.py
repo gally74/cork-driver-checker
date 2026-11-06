@@ -5,8 +5,8 @@ Absolute Possessions sit at the END of the weekly circular, so the source
 PDF should be Sunday_pages.pdf or the full weekly circular (not Mon-Sat
 day extracts). --day only filters which day's slots to print.
 
-Shared by Excel Scan Possessions and the cork-driver-checker website —
-keep formats identical.
+Shared by Excel Scan Possessions and the cork-driver-checker website.
+Keep formats identical.
 
 Usage:
   python possession_extract.py --pdf Sunday_pages.pdf --out notes.txt
@@ -196,7 +196,7 @@ def _miles_pair_ok(a: str, b: str) -> bool:
 
 
 def _parse_miles(body: str) -> str:
-    """Miles From/To — return '' if not confident."""
+    """Miles From/To - return '' if not confident."""
     cleaned = body
     cleaned = re.sub(r"(?i)W\.?C\.?\s*\d+", " ", cleaned)
     cleaned = re.sub(r"-\s*\d{2,3}\s*-", " ", cleaned)
@@ -413,7 +413,7 @@ def _morning_start(t: str) -> bool:
 
 
 def merge_overnight_slots(all_slots: Sequence[PossessionSlot]) -> List[PossessionSlot]:
-    """Merge evening→midnight + next-morning into one overnight display row per day."""
+    """Merge evening->midnight + next-morning into one overnight display row per day."""
     by_day: Dict[str, List[PossessionSlot]] = {d: [] for d in DAY_NAMES}
     for s in all_slots:
         by_day[s.day].append(s)
@@ -592,7 +592,7 @@ def format_possessions_for_day(
 def format_possessions_bundle(
     slots: Sequence[PossessionSlot], *, major_only: bool = False
 ) -> str:
-    """One Python run → all seven day paste blocks (Excel whole-week)."""
+    """One Python run -> all seven day paste blocks (Excel whole-week)."""
     parts = []
     for day in DAY_NAMES:
         parts.append(f"###DAY {day}###")
@@ -631,7 +631,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--out", help="Output text file (single day or whole-week summary)")
     ap.add_argument(
         "--bundle",
-        help="Write all 7 day paste blocks (###DAY Name###) — one parse for Excel week",
+        help="Write all 7 day paste blocks (###DAY Name###) - one parse for Excel week",
     )
     ap.add_argument("--day", help="Monday..Sunday - one-day paste block only")
     ap.add_argument(
