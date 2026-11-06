@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """Extract Cork-area Absolute Possessions - clear & simple.
 
-Focus lines:
-  - Cork East (Cork-Cobh / Midleton)
-  - Cork-Mallow (incl. Charleville)
-  - Mallow-Tralee
+Absolute Possessions sit at the END of the weekly circular, so the source
+PDF should be Sunday_pages.pdf or the full weekly circular (not Mon-Sat
+day extracts). --day only filters which day's slots to print.
 
-PDF layout tip: each section lists From-times, then To-times, then day codes.
-Pair row i as From[i]-To[i].
+Focus lines: Cork East / Cork-Mallow / Mallow-Tralee.
 
 Usage:
   python possession_extract.py --pdf Sunday_pages.pdf --out notes.txt
