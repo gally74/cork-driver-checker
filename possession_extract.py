@@ -312,34 +312,34 @@ def format_possessions_simple(slots: Sequence[PossessionSlot]) -> str:
         lines += ["No Cork-area possessions found in this PDF.", ""]
         return "\n".join(lines)
 
-    current_day = None
-    for s in slots:
-        if s.day != current_day:
-            current_day = s.day
-            day_slots = [x for x in slots if x.day == current_day]
-            major = [x for x in day_slots if _is_major(x)]
-            plant = [x for x in day_slots if not _is_major(x)]
+    for day in DAY_NAMES:
+        day_slots = [x for x in slots if x.day == day]
+        lines.append("")
+        lines.append(day)
+        lines.append("=" * len(day))
+        if not day_slots:
+            lines.append("No Cork-area possessions for this day.")
+            continue
+        major = [x for x in day_slots if _is_major(x)]
+        plant = [x for x in day_slots if not _is_major(x)]
+        if major:
             lines.append("")
-            lines.append(f"{s.day}")
-            lines.append("=" * len(s.day))
-            if major:
-                lines.append("")
-                lines.append("Main / overnight")
-                for x in major:
-                    lines.append(
-                        f"  {x.line}: {x.time_from}-{x.time_to} ({x.duration}) - {x.direction}"
-                    )
-                    detail = x.section
-                    if x.work:
-                        detail += f" - {x.work}"
-                    lines.append(f"    {detail}")
-            if plant:
-                lines.append("")
-                lines.append("Daytime plant (single line)")
-                for x in plant:
-                    lines.append(
-                        f"  {x.line}: {x.time_from}-{x.time_to} ({x.duration}) - {x.section}"
-                    )
+            lines.append("Main / overnight")
+            for x in major:
+                lines.append(
+                    f"  {x.line}: {x.time_from}-{x.time_to} ({x.duration}) - {x.direction}"
+                )
+                detail = x.section
+                if x.work:
+                    detail += f" - {x.work}"
+                lines.append(f"    {detail}")
+        if plant:
+            lines.append("")
+            lines.append("Daytime plant (single line)")
+            for x in plant:
+                lines.append(
+                    f"  {x.line}: {x.time_from}-{x.time_to} ({x.duration}) - {x.section}"
+                )
     lines.append("")
     return "\n".join(lines)
 
@@ -350,7 +350,8 @@ def format_possessions_for_day(day: str, slots: Sequence[PossessionSlot]) -> str
     # One item per line - easy to skim in the daily sheet
     lines = ["* POSSESSIONS (Cork East / Cork-Mallow / Mallow-Tralee)"]
     if not day_slots:
-        lines.append("* (none for this day - skim Sunday Absolute Possessions to confirm)")
+        lines.append(f"* No Cork-area possessions for {day}.")
+        lines.append("* (Skim Sunday Absolute Possessions in the circular to confirm.)")
         return "\n".join(lines)
 
     major = [s for s in day_slots if _is_major(s)]
